@@ -88,13 +88,13 @@ func (r Result[T]) Tap(fn func(T)) Result[T] {
 	return r
 }
 
-// AnyError is a sentinel error value used to match any error.
-var AnyError = errors.New("[opera] any error sentinel")
+// ErrAny is a sentinel error value used to match any error.
+var ErrAny = errors.New("[opera] any error sentinel")
 
 // MapErrIs tests the error using errors.Is, and if it matches, replaces it with another error.
-// opera.AnyError can be used to match any error.
+// opera.ErrAny can be used to match any error.
 func (r Result[T]) MapErrIs(pred error, other error) Result[T] {
-	if r.IsErr() && (errors.Is(pred, AnyError) || errors.Is(r.err, pred)) {
+	if r.IsErr() && (errors.Is(pred, ErrAny) || errors.Is(r.err, pred)) {
 		return Try(r.val, other)
 	}
 	return r
@@ -135,7 +135,7 @@ func (r Result[T]) Catch(fn func(error) Result[T]) Result[T] {
 // CatchIs tests the error using errors.Is, and if it matches, recovers by applying a handler function to produce a value.
 // opera.AnyError can be used to match any error.
 func (r Result[T]) CatchIs(pred error, fallback T) Result[T] {
-	if r.IsErr() && (errors.Is(pred, AnyError) || errors.Is(r.err, pred)) {
+	if r.IsErr() && (errors.Is(pred, ErrAny) || errors.Is(r.err, pred)) {
 		return Ok(fallback)
 	}
 	return r

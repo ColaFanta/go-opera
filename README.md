@@ -1,5 +1,8 @@
 # opera
 
+![Go Version](https://img.shields.io/github/go-mod/go-version/ColaFanta/go-opera)
+![Test Status](https://github.com/ColaFanta/go-opera/actions/workflows/unit-test.yml/badge.svg)
+
 
 `opera` - **Op**tion, **E**rror handling, **R**esult, and **A**sync, a library that brings better error handling and async programming to Golang.
 

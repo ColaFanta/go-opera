@@ -165,9 +165,9 @@ func TestResultMapErrorIsAny(t *testing.T) {
 	is := assert.New(t)
 
 	err1 := errors.New("different error")
-	opt1 := Ok(21).MapErrIs(AnyError, err1)
+	opt1 := Ok(21).MapErrIs(ErrAny, err1)
 
-	opt2 := Err[int](assert.AnError).MapErrIs(AnyError, err1)
+	opt2 := Err[int](assert.AnError).MapErrIs(ErrAny, err1)
 
 	is.Equal(Ok(21), opt1)
 	is.Equal(Err[int](err1), opt2)
@@ -334,7 +334,7 @@ func TestResultCatchIs(t *testing.T) {
 	res2 := Err[int](originalErr).CatchIs(otherErr, 21)
 	is.Equal(Err[int](originalErr), res2)
 
-	res3 := Err[int](originalErr).CatchIs(AnyError, 84)
+	res3 := Err[int](originalErr).CatchIs(ErrAny, 84)
 	is.Equal(Ok(84), res3)
 
 	res4 := Ok(7).CatchIs(originalErr, 100)

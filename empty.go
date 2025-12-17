@@ -54,9 +54,5 @@ func IsEmpty[T any](val T) bool {
 	}
 
 	isEmpty := reflect.ValueOf(&val).Elem().IsZero()
-	if isEmpty {
-		return true
-	}
-
-	return false
+	return isEmpty
 }
