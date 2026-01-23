@@ -28,6 +28,15 @@ func TryHave[T any](val T, ok bool) Result[T] {
 	return Try(val, err)
 }
 
+// TryLookUp attempts to retrieve a value from a map by key, returning a Result.
+func TryLookUp[T any](m map[string]T, key string) Result[T] {
+	val, ok := m[key]
+	if !ok {
+		return Err[T](fmt.Errorf("%w: key '%s' not found", ErrNoSuchElement, key))
+	}
+	return Ok(val)
+}
+
 // TryIf constructs a Result with no value from just a boolean flag.
 func TryIf(ok bool) Result[Unit] {
 	if !ok {
@@ -64,6 +73,11 @@ func MustPass(err error) {
 // MustHave extracts the value from a Result, bail out if the boolean flag is false.
 func MustHave[T any](val T, ok bool) T {
 	return TryHave(val, ok).Yield()
+}
+
+// MustLookUp retrieves a value from a map by key, bails out if the key is not found.
+func MustLookUp[T any](m map[string]T, key string) T {
+	return TryLookUp(m, key).Yield()
 }
 
 // MustTrue bails out if the boolean flag is false.

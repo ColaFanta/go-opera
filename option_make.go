@@ -28,6 +28,16 @@ func MayHave[T any](val T, ok bool) Option[T] {
 	return None[T]()
 }
 
+// MayLookUp attempts to retrieve a value from a map by key, returning an Option.
+func MayLookUp[T any](m map[string]T, key string) Option[T] {
+	val, ok := m[key]
+	if !ok {
+		return None[T]()
+	}
+
+	return Some(val)
+}
+
 // MaybeEmpty builds a Some Option when val is not empty, or None.
 func MaybeEmpty[T any](val T) Option[T] {
 	if IsEmpty(val) {
