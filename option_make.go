@@ -29,7 +29,7 @@ func MayHave[T any](val T, ok bool) Option[T] {
 }
 
 // MayLookUp attempts to retrieve a value from a map by key, returning an Option.
-func MayLookUp[T any](m map[string]T, key string) Option[T] {
+func MayLookUp[K comparable, T any](m map[K]T, key K) Option[T] {
 	val, ok := m[key]
 	if !ok {
 		return None[T]()

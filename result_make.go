@@ -29,10 +29,10 @@ func TryHave[T any](val T, ok bool) Result[T] {
 }
 
 // TryLookUp attempts to retrieve a value from a map by key, returning a Result.
-func TryLookUp[T any](m map[string]T, key string) Result[T] {
+func TryLookUp[K comparable, T any](m map[K]T, key K) Result[T] {
 	val, ok := m[key]
 	if !ok {
-		return Err[T](fmt.Errorf("%w: key '%s' not found", ErrNoSuchElement, key))
+		return Err[T](fmt.Errorf("%w: key '%v' not found", ErrNoSuchElement, key))
 	}
 	return Ok(val)
 }
@@ -76,7 +76,7 @@ func MustHave[T any](val T, ok bool) T {
 }
 
 // MustLookUp retrieves a value from a map by key, bails out if the key is not found.
-func MustLookUp[T any](m map[string]T, key string) T {
+func MustLookUp[K comparable, T any](m map[K]T, key K) T {
 	return TryLookUp(m, key).Yield()
 }
 
