@@ -1,0 +1,99 @@
+# go-opera / package opera
+
+Purpose: provide Rust-like Result/Option-style error handling and structured async helpers for Go.
+
+Module: github.com/colafanta/go-opera
+Package name: opera
+Primary themes: Result, Option, Do/Try/Yield fail-fast flow, async task orchestration, rollback workflow.
+
+## Core Mental Model
+
+- `Result[T]` is the primary error carrier. It stores either `(value, nil)` or `(zero-or-partial-value, err)`.
+- `Option[T]` represents presence/absence without an error.
+- `Do(func() T)` creates a fail-fast block. Inside it, calling `.Yield()` on `Result[T]` or `Option[T]` aborts the block and turns control back into a `Result[T]`.
+- `Try(...)`, `Must(...)`, `TryPass(...)`, `MustPass(...)`, `TryIf(...)`, `MustTrue(...)`, `TryHave(...)`, and `MustHave(...)` are adapters from ordinary Go return patterns into opera's fail-fast flow.
+- `Get()` converts a `Result[T]` back to classic Go `(T, error)` at the boundary.
+
+## What This Package Is Best For
+
+- Refactoring repetitive `if err != nil { return ..., err }` code into a single `Do(...)` block.
+- Building internal service/business logic with explicit success/failure containers.
+- Coordinating concurrent `Result`-returning work with context propagation.
+- Encoding nullable/optional fields with `Option[T]`.
+
+## Preferred Error-Handling Paradigm
+
+Preferred internal style:
+
+1. Convert fallible operations into `Result[T]`.
+2. Compose inside `Do(...)`.
+3. Use `.Yield()` to short-circuit on error or missing optional value.
+4. Recover or remap errors with `CatchIs`, `CatchString`, `MapErrIs`, `MapErrorString`, `MapErr`, or `Catch`.
+5. Exit package boundaries with `.Get()` or `.Err()` only at the edge.
+
+Canonical shape:
+
+```go
+func LoadThing(id string) (Thing, error) {
+    return opera.Do(func() Thing {
+        row := opera.Try(repo.FindByID(id)).Yield()
+        name := opera.MaybeEmpty(row.Name).Yield()
+        opera.MustPass(validate(name))
+        return buildThing(row, name)
+    }).Get()
+}
+```
+
+## Main Export Groups
+
+Result:
+
+- Constructors: `Ok`, `Err`, `Try`, `TryPass`, `TryHave`, `TryLookUp`, `TryIf`, `TryCast`, `CastResult`
+- Bailout helpers: `Must`, `MustPass`, `MustHave`, `MustLookUp`, `MustTrue`, `MustCast`
+- Methods: `IsOk`, `IsErr`, `Get`, `Err`, `Yield`, `Or`, `OrF`, `OrEmpty`, `Map`, `Chain`, `Tap`, `TapErr`, `MapErr`, `MapErrIs`, `MapErrorString`, `Catch`, `CatchIs`, `CatchString`, `ToPointer`, `ToOption`, `ToAny`
+
+Option:
+
+- Constructors: `Some`, `None`, `MayHave`, `MayLookUp`, `MaybeEmpty`, `MaybeNilPtr`, `MayCast`, `CastOption`
+- Methods: `IsSome`, `IsNone`, `Get`, `Yield`, `Or`, `OrEmpty`, `Map`, `Chain`, `Tap`, `TapNone`, `OrElse`, `ToResult`, `ToPointer`, `ToAny`, `IsZero`, `Equal`
+- Integrations: JSON/text/binary/gob marshal/unmarshal, SQL `Scan`, driver `Value`
+
+Async:
+
+- `Async`, `Await`, `AwaitAll`, `AwaitAllT`, `AwaitAllSettled`, `AwaitAllSettledT`, `AwaitFirst`, `AwaitFirstT`
+- `AwaitZip`, `AwaitZip3` ... `AwaitZip9`
+- `Suspend0`, `Suspend`, `Suspend2` ... `Suspend9`
+
+Workflow / utility:
+
+- `Workflow`, `Step`
+- `Scoped`
+- `Tuple`, `Tuple3` ... `Tuple9`, and `Tup`, `Tup3` ... `Tup9`
+- `Unit`, `U`
+- `Empty`, `IsEmpty`
+
+## Constraints LLMs Must Respect When Generating Code
+
+- `Result.Map` is same-type only: `func(T) T`. It does not change the generic type.
+- `Result.Chain` is same-type only: `func(T) Result[T]`.
+- `Option.Map` and `Option.Chain` are also same-type only.
+- `Do` only converts panics produced by opera's internal `Yield` wrapper. Ordinary panics are re-panicked.
+- `Option.Yield()` on `None` becomes `ErrNoSuchElement` only when executed inside `Do` or another caller that intentionally catches the wrapper panic.
+- `AwaitAll` / `AwaitFirst` can accept heterogeneous channels only when called with `T=any` or with zip helpers.
+- `Await(nilChannel)` returns `Ok(zero T)`, not an error.
+- `Workflow()` returns an unexported type; callers store it in a variable and pass it to `Step`, not in exported field signatures.
+
+## Migration Hint For LLMs
+
+When converting classic Go code:
+
+- Old: `v, err := fn(); if err != nil { return zero, err }`
+- New: `v := opera.Try(fn()).Yield()` inside `opera.Do`
+
+- Old: `if err := sideEffect(); err != nil { return err }`
+- New: `opera.MustPass(sideEffect())` inside `opera.Do`
+
+- Old: `v, ok := lookup[k]; if !ok { ... }`
+- New: `v := opera.MustLookUp(lookup, k)` or `opera.MayLookUp(...).Yield()` inside `opera.Do`
+
+See `llms-full.txt` for the detailed generation rules.

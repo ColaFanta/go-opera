@@ -1,0 +1,559 @@
+# go-opera detailed LLM instruction file
+
+Audience: other LLMs generating or transforming Go code that uses package `opera` from module `github.com/colafanta/go-opera`.
+
+Goal: generate code that uses opera idiomatically, preserves real package semantics, and avoids introducing code that looks plausible but does not match the actual API.
+
+## 1. Package Identity
+
+- Import path: `github.com/colafanta/go-opera`
+- Package name in code: `opera`
+- Main role: replace repetitive Go error plumbing with `Result[T]`, `Option[T]`, and `Do`-notation-like fail-fast flow.
+- Secondary role: structured async helpers built around `context.Context` and channels of `Result[T]`.
+
+## 2. Primary Design Pattern
+
+This package prefers a two-layer style:
+
+- Internal logic: use `Result[T]`, `Option[T]`, and `Do(...)`.
+- External/public boundary: return ordinary Go `(T, error)` or `error` by ending with `Get()` or `Err()`.
+
+The package is not trying to remove `error` from Go. It is trying to compress repetitive branching and make fail-fast composition easier.
+
+## 3. Core Types
+
+### Result[T]
+
+`Result[T]` stores:
+
+- a value of type `T`
+- an `error`
+
+Semantics:
+
+- `Ok(v)` means success.
+- `Err[T](err)` means failure.
+- `Try(v, err)` adapts ordinary Go `(T, error)` to `Result[T]`.
+- `Get()` converts back to `(T, error)`.
+- `Yield()` unwraps success, but on error it panics with an internal wrapper that `Do(...)` knows how to catch.
+
+Important: `Result[T]` may still carry a non-zero value when `err != nil`. Some helpers intentionally preserve the value when remapping errors. Do not assume `err != nil` implies `val` is the zero value.
+
+### Option[T]
+
+`Option[T]` stores:
+
+- `Some(v)` for presence
+- `None[T]()` for absence
+
+Use it for nullable/optional data, not for real failures. If absence should be promoted to failure, convert using:
+
+- `ToResult()`
+- `Yield()` inside `Do(...)`
+
+`Option.Yield()` on `None` becomes `ErrNoSuchElement` when caught by `Do(...)`.
+
+### Unit / U
+
+Use `opera.U` when a result needs to represent "success with no payload". This is used by `TryPass`, `TryIf`, and similar helpers.
+
+## 4. The Preferred Fail-Fast Pattern
+
+Canonical structure:
+
+```go
+func ServiceOp(arg string) (Output, error) {
+    return opera.Do(func() Output {
+        item := opera.Try(repoLoad(arg)).Yield()
+        token := opera.MaybeEmpty(item.Token).Yield()
+        opera.MustPass(validate(token))
+        return transform(item, token)
+    }).Get()
+}
+```
+
+Read this as:
+
+1. `Do` creates a `Result[Output]` context.
+2. `Try(repoLoad(arg))` converts `(T, error)` into `Result[T]`.
+3. `.Yield()` unwraps success or aborts the whole block.
+4. The function body stays linear rather than nesting `if err != nil` checks.
+5. `.Get()` converts the final `Result[Output]` back into normal Go returns.
+
+## 5. Mechanical Translation Rules For Converting Existing Go Code
+
+When converting classic Go code into opera style, apply these transformations.
+
+### Pattern A: `(T, error)` call
+
+Before:
+
+```go
+v, err := fn()
+if err != nil {
+    return zero, err
+}
+```
+
+After inside `Do`:
+
+```go
+v := opera.Try(fn()).Yield()
+```
+
+### Pattern B: side-effect returning only `error`
+
+Before:
+
+```go
+if err := save(x); err != nil {
+    return err
+}
+```
+
+After inside `Do`:
+
+```go
+opera.MustPass(save(x))
+```
+
+### Pattern C: `(T, bool)` lookup / presence check
+
+Before:
+
+```go
+v, ok := m[k]
+if !ok {
+    return zero, someErr
+}
+```
+
+Possible conversions:
+
+```go
+v := opera.TryLookUp(m, k).Yield()
+```
+
+or, if absence is not an error until later:
+
+```go
+v := opera.MayLookUp(m, k).Yield()
+```
+
+### Pattern D: nil pointer as missing value
+
+Before:
+
+```go
+if ptr == nil {
+    return zero, errMissing
+}
+v := *ptr
+```
+
+After:
+
+```go
+v := opera.MaybeNilPtr(ptr).Yield()
+```
+
+### Pattern E: empty value treated as missing
+
+Before:
+
+```go
+if s == "" {
+    return zero, errMissing
+}
+```
+
+After:
+
+```go
+s := opera.MaybeEmpty(raw).Yield()
+```
+
+Note: `MaybeEmpty` depends on `opera.IsEmpty`, which treats zero values as empty. This is broader than just empty strings.
+
+### Pattern F: recover known benign errors
+
+Before:
+
+```go
+v, err := fn()
+if errors.Is(err, sql.ErrNoRows) {
+    return fallback, nil
+}
+if err != nil {
+    return zero, err
+}
+```
+
+After:
+
+```go
+return opera.Do(func() T {
+    return opera.Try(fn()).Yield()
+}).CatchIs(sql.ErrNoRows, fallback).Get()
+```
+
+### Pattern G: only need `error`
+
+Before:
+
+```go
+func Run() error {
+    if err := a(); err != nil {
+        return err
+    }
+    if err := b(); err != nil {
+        return err
+    }
+    return nil
+}
+```
+
+After:
+
+```go
+func Run() error {
+    return opera.Do(func() opera.Unit {
+        opera.MustPass(a())
+        opera.MustPass(b())
+        return opera.U
+    }).Err()
+}
+```
+
+## 6. Result API Reference For Generation
+
+Constructors and adapters:
+
+- `Ok[T](val T) Result[T]`
+- `Err[T](err error) Result[T]`
+- `Try[T](val T, err error) Result[T]`
+- `TryPass(err error) Result[Unit]`
+- `TryHave[T](val T, ok bool) Result[T]`
+- `TryLookUp[K comparable, T any](m map[K]T, key K) Result[T]`
+- `TryIf(ok bool) Result[Unit]`
+- `TryCast[T](val any) Result[T]`
+- `CastResult[U, T](res Result[T]) Result[U]`
+
+Bailout helpers:
+
+- `Must[T](val T, err error) T`
+- `MustPass(err error)`
+- `MustHave[T](val T, ok bool) T`
+- `MustLookUp[K comparable, T any](m map[K]T, key K) T`
+- `MustTrue(ok bool)`
+- `MustCast[T](val any) T`
+
+Methods:
+
+- inspection: `IsOk`, `IsErr`, `Get`, `Err`
+- extraction: `Yield`, `Or`, `OrF`, `OrEmpty`
+- same-type transforms: `Map`, `Chain`
+- side effects: `Tap`, `TapErr`
+- error remapping: `MapErr`, `MapErrIs`, `MapErrorString`
+- recovery: `Catch`, `CatchIs`, `CatchString`
+- conversion: `ToPointer`, `ToOption`, `ToAny`
+
+Generation rule: do not invent `FlatMap`, `Unwrap`, `UnwrapOr`, `UnwrapOrElse`, `AndThen`, `Expect`, `Recover`, or typed `Map` that changes `T`. They do not exist here.
+
+## 7. Option API Reference For Generation
+
+Constructors:
+
+- `Some`, `None`
+- `MayHave`
+- `MayLookUp`
+- `MaybeEmpty`
+- `MaybeNilPtr`
+- `MayCast`
+- `CastOption`
+
+Methods:
+
+- inspection: `IsSome`, `IsNone`, `Get`
+- extraction: `Yield`, `Or`, `OrEmpty`
+- same-type transforms: `Map`, `Chain`
+- side effects: `Tap`, `TapNone`
+- fallback: `OrElse`
+- conversion: `ToResult`, `ToPointer`, `ToAny`
+- utility: `IsZero`, `Equal`
+
+Generation rule: use `Option` for missing data, not operational failures.
+
+## 8. Error Handling Paradigm To Prefer
+
+Preferred order of operations:
+
+1. Adapt external call results as early as possible with `Try`, `TryPass`, `TryLookUp`, `TryIf`, or `TryCast`.
+2. Keep the main logic in a `Do(...)` block.
+3. Use `.Yield()` only in contexts where an abort is intended.
+4. Normalize errors after the block using `MapErr*` or recover with `Catch*`.
+5. Only return raw `(T, error)` at package boundaries.
+
+Examples of good recovery patterns:
+
+```go
+res := opera.Do(func() Config {
+    return opera.Try(load()).Yield()
+}).MapErrIs(io.EOF, ErrConfigMissing)
+
+res = res.CatchIs(ErrConfigMissing, defaultConfig)
+```
+
+Use `ErrAny` with `MapErrIs` or `CatchIs` only when intentionally matching any error.
+
+## 9. Important Real Constraints And Pitfalls
+
+These are the mistakes an LLM is most likely to make. Avoid them.
+
+### Pitfall 1: `Do` does not catch arbitrary panics
+
+`Do` only converts panics that carry opera's internal `errYieldErrorWrapper`. Those are produced by `Result.Yield()` and `Option.Yield()`.
+
+Consequences:
+
+- Normal coding bugs still panic.
+- `panic("x")` inside `Do` is not converted to `Err`.
+- `panic(err)` inside `Do` is also re-panicked unless it is the internal wrapper.
+
+### Pitfall 2: `Map` and `Chain` are not type-changing
+
+Actual signatures are same-type only.
+
+- `Result[T].Map(func(T) T)`
+- `Result[T].Chain(func(T) Result[T])`
+- `Option[T].Map(func(T) T)`
+- `Option[T].Chain(func(T) Option[T])`
+
+Do not generate cross-type transforms with these methods.
+
+If you need a new type, use explicit local variables or convert through normal Go code.
+
+### Pitfall 3: `Yield()` outside a managed flow will panic
+
+`Yield()` is intended for `Do(...)` or for callers that knowingly allow panic-based bailout. Avoid generating `.Yield()` in top-level code unless it is clearly inside `Do`.
+
+### Pitfall 4: `Option` absence becomes `ErrNoSuchElement`
+
+When `None.Yield()` is used inside `Do`, the resulting `Err` is `ErrNoSuchElement`.
+
+This is useful for fail-fast conversion, but it may be too generic if the API boundary needs a domain-specific error. In that case, remap it with `MapErrIs` or recover with `CatchIs` and then wrap explicitly.
+
+### Pitfall 5: nil channels are not treated as failures
+
+Actual behavior:
+
+- `Await(nil)` returns `Ok(zero T)`.
+- `AwaitAllSettled` turns nil channels into `Ok(zero T)` entries.
+- `AwaitFirst` with all nil channels returns `Ok(zero tuple)`.
+
+Do not assume nil channels signal an error.
+
+### Pitfall 6: heterogeneous async waits require the right form
+
+If channels carry different `Result[...]` element types, use one of:
+
+- `AwaitAll[any](ctx, ch1, ch2, ...)`
+- `AwaitFirst[any](ctx, ch1, ch2, ...)`
+- `AwaitZip`, `AwaitZip3`, ... for typed tuples
+
+If you call `AwaitAll[T]` with mismatched channel payloads, casts may fail with `ErrAsyncAwaitedValueCastError`.
+
+### Pitfall 7: `Workflow` exposes behavior, not type names
+
+`Workflow()` returns `*workflow`, where `workflow` is unexported.
+
+Good:
+
+```go
+flow := opera.Workflow()
+id := opera.Step(flow, createUser, rollbackUser)
+```
+
+Bad:
+
+```go
+var flow opera.workflow
+```
+
+### Pitfall 8: `Scoped` always defers `release`
+
+`Scoped(acquire, use, release)` defers `release(acquiredRes)` immediately after `acquire().Get()` and before checking the error.
+
+Practical consequence: `release` must tolerate the zero value of `T`, because it will run even when `acquire` returns an error.
+
+### Pitfall 9: `MaybeEmpty` is broad, not string-specific
+
+`MaybeEmpty` uses `IsEmpty`, which treats zero values as empty across many types. That means `0`, `false`, empty arrays, nil-like values, and type-specific zero values may be treated as absent.
+
+Use it only when zero-value-as-missing is the intended business rule.
+
+### Pitfall 10: Option JSON omission nuance
+
+`Option[T]` has custom `MarshalJSON`. The code comments note that `omitempty` does not rely on `IsZero` when `MarshalJSON` exists, and recommends `omitzero` for Go 1.24+.
+
+When generating struct tags for optional JSON fields, prefer the package's own note:
+
+- use `omitzero` rather than assuming `omitempty` will omit absent options
+
+## 10. Async Model
+
+### Basic pattern
+
+```go
+func LoadBoth(ctx context.Context) error {
+    return opera.Do(func() opera.Unit {
+        aTask := opera.Async(ctx, func(ctx context.Context) opera.Result[int] {
+            return opera.Try(loadA(ctx))
+        })
+        bTask := opera.Async(ctx, func(ctx context.Context) opera.Result[string] {
+            return opera.Try(loadB(ctx))
+        })
+
+        a := opera.Await(ctx, aTask).Yield()
+        b := opera.Await(ctx, bTask).Yield()
+        _ = a
+        _ = b
+        return opera.U
+    }).Err()
+}
+```
+
+### Async exports
+
+- `Async(ctx, thunk)` runs a `Thunk[T]` in a goroutine and returns `<-chan Result[T]`.
+- `Await` waits for one task.
+- `AwaitAll` returns `Result[[]T]` and fails early on first error.
+- `AwaitAllSettled` returns `[]Result[T]` and never short-circuits.
+- `AwaitFirst` returns the first successful result as `Result[Tuple[T, int]]`, where the second tuple field is the winning channel index.
+- `AwaitZipN` helpers await multiple typed channels and return tuples.
+- `SuspendN` adapters turn parameterized functions into `Thunk` factories usable with `Async`.
+
+Context notes:
+
+- `Async` respects parent context cancellation when sending its result.
+- `Await` also returns an error result if the wait context is canceled.
+
+## 11. Workflow Pattern
+
+Use `Workflow` + `Step` when multiple operations need reverse-order rollback on failure.
+
+Shape:
+
+```go
+func Provision() error {
+    return opera.Do(func() opera.Unit {
+        flow := opera.Workflow()
+
+        userID := opera.Step(flow,
+            func() opera.Result[string] { return opera.Try(createUser()) },
+            func(err error) { _ = deleteUser(userID) },
+        )
+
+        _ = userID
+        return opera.U
+    }).Err()
+}
+```
+
+Behavior:
+
+- each `Step` registers its rollback
+- if a step returns an error, all registered rollbacks run in reverse order
+- `Step` itself yields the underlying result, so inside `Do` it aborts the flow on failure
+
+## 12. When To Use Which Primitive
+
+Use `Result[T]` when:
+
+- an operation can fail
+- you need to preserve or remap an `error`
+- you are adapting normal Go `(T, error)` functions
+
+Use `Option[T]` when:
+
+- absence is expected and not exceptional
+- you are modeling nullable fields or optional lookups
+- you want to defer converting absence into failure until later
+
+Use `Unit` / `U` when:
+
+- only success/failure matters, not a payload
+
+Use async helpers when:
+
+- multiple `Result`-returning tasks can run concurrently
+- you want cancellation and joining semantics without hand-writing channel plumbing
+
+## 13. Generation Recommendations
+
+When generating new code with this package, prefer these stylistic rules.
+
+1. Keep `Do(...)` blocks small and linear.
+2. Use `Try(...)` immediately around ordinary Go `(T, error)` calls.
+3. Use `MustPass(...)` for `error`-only calls inside `Do(...)`.
+4. Use `CatchIs` or `MapErrIs` after the `Do(...)` block rather than adding nested conditionals inside it.
+5. End public functions with `.Get()` or `.Err()`.
+6. Choose `Option` only when absence is semantically distinct from failure.
+7. Prefer type-safe wrappers `AwaitAllT`, `AwaitFirstT`, and `AwaitAllSettledT` for homogeneous async channels.
+8. Prefer `AwaitZipN` for small fixed heterogenous joins.
+
+## 14. What Not To Generate
+
+Avoid generating code that:
+
+- uses `.Yield()` outside a `Do(...)` block unless deliberate panic semantics are intended
+- assumes `Map` or `Chain` can change type parameters
+- invents non-existent methods from Rust, Scala, samber/mo, or other result libraries
+- treats `Option` as the standard carrier of operational errors
+- assumes nil async channels fail
+- refers to exported type names for the workflow internals
+- uses `MaybeEmpty` when zero values are valid business data
+
+## 15. Minimal Templates
+
+Template: `(T, error)` API backed by opera
+
+```go
+func F(arg string) (T, error) {
+    return opera.Do(func() T {
+        v := opera.Try(dep(arg)).Yield()
+        return use(v)
+    }).Get()
+}
+```
+
+Template: `error`-only API backed by opera
+
+```go
+func F() error {
+    return opera.Do(func() opera.Unit {
+        opera.MustPass(step1())
+        opera.MustPass(step2())
+        return opera.U
+    }).Err()
+}
+```
+
+Template: recover a known not-found error
+
+```go
+func Exists(id string) (bool, error) {
+    return opera.Do(func() bool {
+        _ = opera.Try(load(id)).Yield()
+        return true
+    }).CatchIs(sql.ErrNoRows, false).Get()
+}
+```
+
+Template: optional pointer field
+
+```go
+name := opera.MaybeNilPtr(input.Name).Or("anonymous")
+```
+
+End of instruction file.
