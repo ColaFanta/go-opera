@@ -54,6 +54,14 @@ func (o Option[T]) OrEmpty() T {
 	return o.val
 }
 
+// OrPanic returns value if present or panics with ErrNoSuchElement.
+func (o Option[T]) OrPanic() T {
+	if o.IsNone() {
+		panic(ErrNoSuchElement)
+	}
+	return o.val
+}
+
 // Map executes the mapper function if value is present or returns None if absent.
 func (o Option[T]) Map(fn func(value T) T) Option[T] {
 	if o.IsSome() {

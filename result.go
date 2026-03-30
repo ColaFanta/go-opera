@@ -64,6 +64,14 @@ func (r Result[T]) OrEmpty() T {
 	return Empty[T]()
 }
 
+// OrPanic panics with the original error. Do not confuse with Yield, which is used in Do notation.
+func (r Result[T]) OrPanic() T {
+	if r.IsErr() {
+		panic(r.err)
+	}
+	return r.val
+}
+
 // Map applies a function to the value if the Result is Ok, otherwise returns the Err unchanged.
 func (r Result[T]) Map(fn func(T) T) Result[T] {
 	if r.IsErr() {
