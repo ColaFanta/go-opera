@@ -4,7 +4,7 @@ Purpose: provide Rust-like Result/Option-style error handling and structured asy
 
 Module: github.com/colafanta/go-opera
 Package name: opera
-Primary themes: Result, Option, Do/Try/Yield fail-fast flow, async task orchestration, rollback workflow.
+Primary themes: Result, Option, Do/Try/Yield fail-fast flow, async task orchestration, finalizer-based workflow.
 
 ## Core Mental Model
 
@@ -66,7 +66,7 @@ Async:
 
 Workflow / utility:
 
-- `Workflow`, `Step`
+- `Workflow`, `Step`, `Finalize`
 - `Scoped`
 - `Tuple`, `Tuple3` ... `Tuple9`, and `Tup`, `Tup3` ... `Tup9`
 - `Unit`, `U`

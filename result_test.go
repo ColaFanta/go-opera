@@ -42,6 +42,19 @@ func TestResultTryIf(t *testing.T) {
 	is.Equal(Try(3, fmt.Errorf("%w: %T", ErrNoSuchElement, 3)), TryHave(3, false))
 }
 
+func TestResultTryAt(t *testing.T) {
+	is := assert.New(t)
+
+	slice := []int{10, 20, 30}
+	array := [3]int{40, 50, 60}
+
+	is.Equal(Ok(20), TryAt(slice, 1))
+	is.Equal(Ok(60), TryAt(array[:], 2))
+	is.ErrorIs(TryAt(slice, -1).Err(), ErrNoSuchElement)
+	is.ErrorIs(TryAt(slice, 3).Err(), ErrNoSuchElement)
+	is.ErrorIs(TryAt([]int{}, 0).Err(), ErrNoSuchElement)
+}
+
 func TestResultTryCast(t *testing.T) {
 	is := assert.New(t)
 
@@ -93,6 +106,22 @@ func TestResultMustOk(t *testing.T) {
 	})
 
 	is.Equal(42, Ok(42).Yield())
+}
+
+func TestResultMustAt(t *testing.T) {
+	is := assert.New(t)
+
+	slice := []int{10, 20, 30}
+	array := [3]int{40, 50, 60}
+
+	is.Equal(20, MustAt(slice, 1))
+	is.Equal(60, MustAt(array[:], 2))
+	is.Panics(func() {
+		MustAt(slice, -1)
+	})
+	is.Panics(func() {
+		MustAt(slice, 3)
+	})
 }
 
 func TestResultOr(t *testing.T) {

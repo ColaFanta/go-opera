@@ -371,7 +371,7 @@ Good:
 
 ```go
 flow := opera.Workflow()
-id := opera.Step(flow, createUser, rollbackUser)
+id := opera.Step(flow, createUser, finalizerUser)
 ```
 
 Bad:
@@ -440,7 +440,7 @@ Context notes:
 
 ## 11. Workflow Pattern
 
-Use `Workflow` + `Step` when multiple operations need reverse-order rollback on failure.
+Use `Workflow` + `Step` when multiple operations need reverse-order finalization on failure, and call `Finalize` when the workflow succeeds.
 
 Shape:
 
@@ -451,10 +451,16 @@ func Provision() error {
 
         userID := opera.Step(flow,
             func() opera.Result[string] { return opera.Try(createUser()) },
-            func(err error) { _ = deleteUser(userID) },
+            func(err error) opera.Result[opera.Unit] {
+                if err != nil {
+                    return opera.TryPass(deleteUser(userID))
+                }
+                return opera.Ok(opera.U)
+            },
         )
 
         _ = userID
+        opera.Finalize(flow)
         return opera.U
     }).Err()
 }
@@ -462,8 +468,9 @@ func Provision() error {
 
 Behavior:
 
-- each `Step` registers its rollback
-- if a step returns an error, all registered rollbacks run in reverse order
+- each `Step` registers its finalizer
+- if a step returns an error, all registered finalizers run in reverse order
+- `Finalize(flow)` runs the registered finalizers in reverse order on the success path
 - `Step` itself yields the underlying result, so inside `Do` it aborts the flow on failure
 
 ## 12. When To Use Which Primitive

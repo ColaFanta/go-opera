@@ -32,6 +32,19 @@ func TestFromMayHave(t *testing.T) {
 	is.Equal(Option[int]{hasVal: true, val: 42}, MayHave(cb(42, true)()))
 }
 
+func TestFromMayAt(t *testing.T) {
+	is := assert.New(t)
+
+	slice := []int{10, 20, 30}
+	array := [3]int{40, 50, 60}
+
+	is.Equal(Option[int]{hasVal: true, val: 20}, MayAt(slice, 1))
+	is.Equal(Option[int]{hasVal: true, val: 60}, MayAt(array[:], 2))
+	is.Equal(Option[int]{hasVal: false}, MayAt(slice, -1))
+	is.Equal(Option[int]{hasVal: false}, MayAt(slice, 3))
+	is.Equal(Option[int]{hasVal: false}, MayAt([]int{}, 0))
+}
+
 func TestOptionMaybeCast(t *testing.T) {
 	is := assert.New(t)
 

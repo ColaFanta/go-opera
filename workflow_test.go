@@ -11,43 +11,51 @@ import (
 func TestWorkFlowStep(t *testing.T) {
 	is := assert.New(t)
 
-	rollback1Called := false
-	rollback2Called := false
+	callOrder := 0
+	finalizer1CalledAt := 0
+	finalizer2CalledAt := 0
 
 	flow := Workflow()
 
 	step1 := func() Result[int] {
 		return Ok(42)
 	}
-	rollback1 := func(err error) {
-		rollback1Called = true
+	finalizer1 := func(err error) Result[Unit] {
+		callOrder++
+		finalizer1CalledAt = callOrder
+		return Ok(U)
 	}
 
 	step2 := func() Result[string] {
 		return Err[string](assert.AnError)
 	}
-	rollback2 := func(err error) {
-		rollback2Called = true
+	finalizer2 := func(err error) Result[Unit] {
+		callOrder++
+		finalizer2CalledAt = callOrder
+		return Ok(U)
 	}
 
-	r1 := Step(flow, step1, rollback1)
+	r1 := Step(flow, step1, finalizer1)
 	is.Equal(42, r1)
 
-	is.False(rollback1Called)
-	is.False(rollback2Called)
+	is.Zero(finalizer1CalledAt)
+	is.Zero(finalizer2CalledAt)
+	is.False(flow.isFinalized)
 	is.Panics(assert.PanicTestFunc(func() {
-		Step(flow, step2, rollback2)
+		Step(flow, step2, finalizer2)
 	}))
-	is.True(rollback2Called)
-	is.True(rollback1Called)
+	is.Equal(1, finalizer2CalledAt)
+	is.Equal(2, finalizer1CalledAt)
+	is.True(flow.isFinalized)
 
 }
 
 func TestWorkFlowAsyncStep(t *testing.T) {
 	is := assert.New(t)
 	ctx := t.Context()
-	rollback1Called := false
-	rollback2Called := false
+	callOrder := 0
+	finalizer1CalledAt := 0
+	finalizer2CalledAt := 0
 
 	flow := Workflow()
 
@@ -60,8 +68,10 @@ func TestWorkFlowAsyncStep(t *testing.T) {
 		<-ch
 		return Ok(42)
 	}
-	rollback1 := func(err error) {
-		rollback1Called = true
+	finalizer1 := func(err error) Result[Unit] {
+		callOrder++
+		finalizer1CalledAt = callOrder
+		return Ok(U)
 	}
 
 	step2 := func(context.Context) Result[string] {
@@ -73,24 +83,76 @@ func TestWorkFlowAsyncStep(t *testing.T) {
 		<-ch
 		return Err[string](assert.AnError)
 	}
-	rollback2 := func(err error) {
-		rollback2Called = true
+	finalizer2 := func(err error) Result[Unit] {
+		callOrder++
+		finalizer2CalledAt = callOrder
+		return Ok(U)
 	}
 
 	r1 := Step(flow, func() Result[int] {
 		return step1(ctx)
-	}, rollback1)
+	}, finalizer1)
 	is.Equal(42, r1)
-	is.False(rollback1Called)
-	is.False(rollback2Called)
+	is.Zero(finalizer1CalledAt)
+	is.Zero(finalizer2CalledAt)
+	is.False(flow.isFinalized)
 
 	is.Panics(assert.PanicTestFunc(func() {
 		Step(flow, func() Result[string] {
 			return step2(ctx)
-		}, rollback2)
+		}, finalizer2)
 	}))
-	is.True(rollback2Called)
-	is.True(rollback1Called)
+	is.Equal(1, finalizer2CalledAt)
+	is.Equal(2, finalizer1CalledAt)
+	is.True(flow.isFinalized)
+}
+
+func TestWorkFlowFinalize(t *testing.T) {
+	is := assert.New(t)
+
+	callOrder := 0
+	finalizer1CalledAt := 0
+	finalizer2CalledAt := 0
+	finalizer1Err := assert.AnError
+	finalizer2Err := assert.AnError
+
+	flow := Workflow()
+
+	step1 := func() Result[int] {
+		return Ok(42)
+	}
+	finalizer1 := func(err error) Result[Unit] {
+		callOrder++
+		finalizer1CalledAt = callOrder
+		finalizer1Err = err
+		return Ok(U)
+	}
+
+	step2 := func() Result[string] {
+		return Ok("ok")
+	}
+	finalizer2 := func(err error) Result[Unit] {
+		callOrder++
+		finalizer2CalledAt = callOrder
+		finalizer2Err = err
+		return Ok(U)
+	}
+
+	r1 := Step(flow, step1, finalizer1)
+	is.Equal(42, r1)
+	r2 := Step(flow, step2, finalizer2)
+	is.Equal("ok", r2)
+	is.False(flow.isFinalized)
+	is.Zero(finalizer1CalledAt)
+	is.Zero(finalizer2CalledAt)
+
+	Finalize(flow)
+
+	is.True(flow.isFinalized)
+	is.Equal(1, finalizer2CalledAt)
+	is.Equal(2, finalizer1CalledAt)
+	is.NoError(finalizer1Err)
+	is.NoError(finalizer2Err)
 }
 
 func TestNestedWorkflow(t *testing.T) {
@@ -98,10 +160,11 @@ func TestNestedWorkflow(t *testing.T) {
 
 	flow := Workflow()
 
-	rootflowRollback1Called := false
-	rootflowRollback2Called := false
-	nestedflowRollback1Called := false
-	nestedflowRollback2Called := false
+	callOrder := 0
+	rootflowFinalizer1CalledAt := 0
+	rootflowFinalizer2CalledAt := 0
+	nestedflowFinalizer1CalledAt := 0
+	nestedflowFinalizer2CalledAt := 0
 
 	nestedWork := func() Result[int] {
 		return Do(func() int {
@@ -110,21 +173,25 @@ func TestNestedWorkflow(t *testing.T) {
 			step1 := func() Result[int] {
 				return Ok(100)
 			}
-			rollback1 := func(err error) {
-				nestedflowRollback1Called = true
+			finalizer1 := func(err error) Result[Unit] {
+				callOrder++
+				nestedflowFinalizer1CalledAt = callOrder
+				return Ok(U)
 			}
 
 			step2 := func() Result[string] {
 				return Err[string](assert.AnError)
 			}
-			rollback2 := func(err error) {
-				nestedflowRollback2Called = true
+			finalizer2 := func(err error) Result[Unit] {
+				callOrder++
+				nestedflowFinalizer2CalledAt = callOrder
+				return Ok(U)
 			}
 
-			r1 := Step(flow, step1, rollback1)
+			r1 := Step(flow, step1, finalizer1)
 			is.Equal(100, r1)
 
-			Step(flow, step2, rollback2)
+			Step(flow, step2, finalizer2)
 			return r1
 		})
 	}
@@ -132,25 +199,81 @@ func TestNestedWorkflow(t *testing.T) {
 	step1 := func() Result[int] {
 		return Ok(42)
 	}
-	rollback1 := func(err error) {
-		rootflowRollback1Called = true
+	finalizer1 := func(err error) Result[Unit] {
+		callOrder++
+		rootflowFinalizer1CalledAt = callOrder
+		return Ok(U)
 	}
-	rollback2 := func(err error) {
-		rootflowRollback2Called = true
+	finalizer2 := func(err error) Result[Unit] {
+		callOrder++
+		rootflowFinalizer2CalledAt = callOrder
+		return Ok(U)
 	}
 
-	r1 := Step(flow, step1, rollback1)
+	r1 := Step(flow, step1, finalizer1)
 	is.Equal(42, r1)
 
-	is.False(rootflowRollback1Called)
-	is.False(rootflowRollback2Called)
-	is.False(nestedflowRollback1Called)
-	is.False(nestedflowRollback2Called)
+	is.Zero(rootflowFinalizer1CalledAt)
+	is.Zero(rootflowFinalizer2CalledAt)
+	is.Zero(nestedflowFinalizer1CalledAt)
+	is.Zero(nestedflowFinalizer2CalledAt)
+	is.False(flow.isFinalized)
 	is.Panics(assert.PanicTestFunc(func() {
-		Step(flow, nestedWork, rollback2)
+		Step(flow, nestedWork, finalizer2)
 	}))
-	is.True(rootflowRollback1Called)
-	is.True(rootflowRollback2Called)
-	is.True(nestedflowRollback1Called)
-	is.True(nestedflowRollback2Called)
+	is.Equal(1, nestedflowFinalizer2CalledAt)
+	is.Equal(2, nestedflowFinalizer1CalledAt)
+	is.Equal(3, rootflowFinalizer2CalledAt)
+	is.Equal(4, rootflowFinalizer1CalledAt)
+	is.True(flow.isFinalized)
+}
+
+func TestWorkflowPanicsWhenRunningFinalizedWorkflow(t *testing.T) {
+	t.Run("after explicit finalize", func(t *testing.T) {
+		is := assert.New(t)
+
+		flow := Workflow()
+		Step(flow, func() Result[int] {
+			return Ok(1)
+		}, func(err error) Result[Unit] {
+			return Ok(U)
+		})
+
+		Finalize(flow)
+		is.True(flow.isFinalized)
+		is.PanicsWithValue("workflow has already been finalized", func() {
+			Step(flow, func() Result[int] {
+				return Ok(2)
+			}, func(err error) Result[Unit] {
+				return Ok(U)
+			})
+		})
+	})
+
+	t.Run("after step error", func(t *testing.T) {
+		is := assert.New(t)
+
+		flow := Workflow()
+		Step(flow, func() Result[int] {
+			return Ok(1)
+		}, func(err error) Result[Unit] {
+			return Ok(U)
+		})
+
+		is.Panics(func() {
+			Step(flow, func() Result[int] {
+				return Err[int](assert.AnError)
+			}, func(err error) Result[Unit] {
+				return Ok(U)
+			})
+		})
+		is.True(flow.isFinalized)
+		is.PanicsWithValue("workflow has already been finalized", func() {
+			Step(flow, func() Result[int] {
+				return Ok(2)
+			}, func(err error) Result[Unit] {
+				return Ok(U)
+			})
+		})
+	})
 }

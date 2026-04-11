@@ -37,6 +37,15 @@ func TryLookUp[K comparable, T any](m map[K]T, key K) Result[T] {
 	return Ok(val)
 }
 
+// TryAt attempts to retrieve an element from a slice by index, returning a Result.
+// Arrays can be passed as arr[:].
+func TryAt[T any](x []T, index int) Result[T] {
+	if index < 0 || index >= len(x) {
+		return Err[T](fmt.Errorf("%w: index %d out of bounds", ErrNoSuchElement, index))
+	}
+	return Ok(x[index])
+}
+
 // TryIf constructs a Result with no value from just a boolean flag.
 func TryIf(ok bool) Result[Unit] {
 	if !ok {
@@ -78,6 +87,12 @@ func MustHave[T any](val T, ok bool) T {
 // MustLookUp retrieves a value from a map by key, bails out if the key is not found.
 func MustLookUp[K comparable, T any](m map[K]T, key K) T {
 	return TryLookUp(m, key).Yield()
+}
+
+// MustAt retrieves an element from a slice by index, bails out if the index is out of bounds.
+// Arrays can be passed as arr[:].
+func MustAt[T any](x []T, index int) T {
+	return TryAt(x, index).Yield()
 }
 
 // MustTrue bails out if the boolean flag is false.

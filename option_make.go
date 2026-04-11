@@ -38,6 +38,15 @@ func MayLookUp[K comparable, T any](m map[K]T, key K) Option[T] {
 	return Some(val)
 }
 
+// MayAt attempts to retrieve an element from a slice by index, returning an Option.
+// Arrays can be passed as arr[:].
+func MayAt[T any](x []T, index int) Option[T] {
+	if index < 0 || index >= len(x) {
+		return None[T]()
+	}
+	return Some(x[index])
+}
+
 // MaybeEmpty builds a Some Option when val is not empty, or None.
 func MaybeEmpty[T any](val T) Option[T] {
 	if IsEmpty(val) {
