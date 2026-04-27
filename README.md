@@ -62,7 +62,7 @@ func(user, password string) (ok bool, err error) {
         pwd := opera.MaybeNilPtr(user.Password).Yield()
 
         // also fail fast if seen `ErrMismatchedHashAndPassword`
-        opera.Must0(bcrypt.CompareHashAndPassword([]byte(pwd), []byte(password)))
+        opera.MustPass(bcrypt.CompareHashAndPassword([]byte(pwd), []byte(password)))
 
         // login success
         return true
