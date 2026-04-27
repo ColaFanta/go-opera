@@ -4,16 +4,19 @@
 ![Test Status](https://github.com/ColaFanta/go-opera/actions/workflows/unit-test.yml/badge.svg)
 
 
+![go-opera banner](./.github/assets/repo_banner.png)
+
 `opera` - **Op**tion, **E**rror handling, **R**esult, and **A**sync, a library that brings better error handling and async programming to Golang.
 
-## Acknowledgments
+## Introductions
 
-This library was inspired by two excellent projects:
+Here are blog posts that explain concepts in detail:
 
-- [eh](https://github.com/olevski/eh), which introduced the idea of Rust‑like error handling in Go.
-- [mo](https://github.com/samber/mo), from which the `Do` notation and `Option` marshaling into/out of values were adapted.
+[Effective error handling in Go with Rust-like Result and "?"](https://dev.to/colafanta/guide-to-go-opera-better-error-handling-in-go-but-less-boilerplate-2hf4)
 
-Many thanks to their authors for the inspiration.
+[Why FlatMap Isn’t Ideal for Go Error Handling — A Case for go-opera](https://dev.to/colafanta/go-error-handling-why-flatmap-not-helpful-go-opera-1j25)
+
+[Async/Await-like pattern in Go to make concurrency simple, robust, less boilerplate](https://dev.to/colafanta/asyncawait-like-pattern-in-go-to-make-structured-concurrency-easy-and-with-less-boilerplate-121l)
 
 ## Use Case
 ### Error Handling with opera
@@ -62,7 +65,7 @@ func(user, password string) (ok bool, err error) {
         pwd := opera.MaybeNilPtr(user.Password).Yield()
 
         // also fail fast if seen `ErrMismatchedHashAndPassword`
-        opera.Must0(bcrypt.CompareHashAndPassword([]byte(pwd), []byte(password)))
+        opera.MustPass(bcrypt.CompareHashAndPassword([]byte(pwd), []byte(password)))
 
         // login success
         return true
@@ -105,3 +108,12 @@ func(ctx context.Context, q *gorm.DB, p Params) error {
     }).Err()
 }
 ```
+
+## Acknowledgments
+
+This library was inspired by two excellent projects:
+
+- [eh](https://github.com/olevski/eh), which introduced the idea of Rust‑like error handling in Go.
+- [mo](https://github.com/samber/mo), from which the `Do` notation and `Option` marshaling into/out of values were adapted.
+
+Many thanks to their authors for the inspiration.
