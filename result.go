@@ -2,10 +2,14 @@ package opera
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 )
 
-// Result represents a value that may either be a success (Ok) or a failure (Err).
+// Result represents the value and error returned by an operation.
+// A Result preserves its value even when it is an Err, which permits callers of
+// Get to inspect partial operation output. Values in an Err are not successful
+// results and cannot be extracted with Yield.
 type Result[T any] struct {
 	val T
 	err error
@@ -35,7 +39,8 @@ func (r Result[T]) Err() error {
 	return r.err
 }
 
-// Get extracts the value and error from a Result.
+// Get extracts the value and error from a Result. The value may contain partial
+// operation output when the Result is an Err.
 func (r Result[T]) Get() (T, error) {
 	return r.val, r.err
 }
@@ -72,18 +77,32 @@ func (r Result[T]) OrPanic() T {
 	return r.val
 }
 
-// Map applies a function to the value if the Result is Ok, otherwise returns the Err unchanged.
-func (r Result[T]) Map(fn func(T) T) Result[T] {
+// Map applies a function to the value if the Result is Ok.
+// For an Err, it preserves the value only when it can be asserted to M; otherwise
+// it returns an Err with M's zero value. Do not rely on Map to retain an error
+// payload across a type change.
+func (r Result[T]) Map[M any](fn func(T) M) Result[M] {
 	if r.IsErr() {
-		return r
+		if m, ok := any(r.val).(M); ok {
+			return Try(m, r.err)
+		} else {
+			return Err[M](r.err)
+		}
 	}
 	return Ok(fn(r.val))
 }
 
-// Chain applies a function that returns a Result to the value if the Result is Ok, otherwise returns the Err unchanged.
-func (r Result[T]) Chain(fn func(T) Result[T]) Result[T] {
+// FlatMap applies a function that returns a Result to the value if the Result is Ok.
+// For an Err, it preserves the value only when it can be asserted to M; otherwise
+// it returns an Err with M's zero value. Do not rely on FlatMap to retain an
+// error payload across a type change.
+func (r Result[T]) FlatMap[M any](fn func(T) Result[M]) Result[M] {
 	if r.IsErr() {
-		return r
+		if m, ok := any(r.val).(M); ok {
+			return Try(m, r.err)
+		} else {
+			return Err[M](r.err)
+		}
 	}
 	return fn(r.val)
 }
@@ -181,7 +200,24 @@ func (r Result[T]) ToOption() Option[T] {
 	return Some(r.val)
 }
 
-// ToAny maybe helpful when need to convert Result[T] to Result[any].
-func (r Result[T]) ToAny() Result[any] {
-	return Try[any](r.Get())
+// Cast maybe helpful when need to convert Result[T] to Result[C].
+func (r Result[T]) Cast[C any]() Result[C] {
+	val, err := r.Get()
+	if err != nil {
+		if c, ok := any(val).(C); ok {
+			return Try(c, err)
+		} else {
+			return Err[C](err)
+		}
+	}
+	if c, ok := any(val).(C); ok {
+		return Ok(c)
+	} else {
+		return Err[C](fmt.Errorf(
+			"%w: expect %T, actual %T",
+			ErrResultCastFailed,
+			c,
+			val,
+		))
+	}
 }

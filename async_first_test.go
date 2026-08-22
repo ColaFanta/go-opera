@@ -3,6 +3,9 @@ package opera
 import (
 	"context"
 	"errors"
+	"runtime"
+	"runtime/pprof"
+	"sync"
 	"testing"
 	"time"
 
@@ -214,4 +217,31 @@ func TestAwaitFirstAllFailed(t *testing.T) {
 
 	is.True(result.IsErr())
 	is.ErrorIs(result.Err(), ErrAsyncAllOpsFailed)
+}
+
+func TestAwaitFirstGoroutineLeakProfile(t *testing.T) {
+	is := assert.New(t)
+	ctx := t.Context()
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	workers.Add(3)
+
+	chans := make([]<-chan Result[int], 3)
+	for index := range chans {
+		chans[index] = Async[int](ctx, func(context.Context) Result[int] {
+			defer workers.Done()
+			<-start
+			return Ok(42)
+		})
+	}
+
+	close(start)
+	result := AwaitFirstT(ctx, chans...)
+	workers.Wait()
+	is.True(result.IsOk())
+
+	// The goroutineleak profile identifies unreachable blocked goroutines at GC.
+	runtime.GC()
+	runtime.GC()
+	is.Zero(pprof.Lookup("goroutineleak").Count())
 }

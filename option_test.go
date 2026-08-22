@@ -100,7 +100,7 @@ func TestOptionGet(t *testing.T) {
 	is.Equal(true, ok1)
 	is.Equal(0, v2)
 	is.Equal(false, ok2)
-	is.Equal("xx", v3)
+	is.Equal("", v3)
 	is.Equal(false, ok3)
 }
 
@@ -158,7 +158,7 @@ func TestOptionMap(t *testing.T) {
 
 	is.Equal(Some(42), opt1)
 	is.Equal(None[int](), opt2)
-	is.Equal("hello", opt3.val)
+	is.Equal(None[string](), opt3)
 }
 
 func TestOptionMapNone(t *testing.T) {
@@ -176,41 +176,41 @@ func TestOptionMapNone(t *testing.T) {
 	is.Equal(Some(42), opt2)
 }
 
-func TestOptionChain(t *testing.T) {
+func TestOptionFlatMap(t *testing.T) {
 	is := assert.New(t)
 
-	opt1 := Some(21).Chain(func(i int) Option[int] {
+	opt1 := Some(21).FlatMap(func(i int) Option[int] {
 		return Some(42)
 	})
-	opt2 := None[int]().Chain(func(i int) Option[int] {
+	opt2 := None[int]().FlatMap(func(i int) Option[int] {
 		return Some(42)
 	})
-	opt3 := Option[string]{val: "hello", hasVal: false}.Chain(func(s string) Option[string] {
+	opt3 := Option[string]{val: "hello", hasVal: false}.FlatMap(func(s string) Option[string] {
 		is.Fail("should not be called")
 		return Some(strings.ToUpper(s))
 	})
 
 	is.Equal(Some(42), opt1)
 	is.Equal(None[int](), opt2)
-	is.Equal("hello", opt3.val)
+	is.Equal(None[string](), opt3)
 }
 
 func TestOptionTypeConvert(t *testing.T) {
 	is := assert.New(t)
 
-	opt1 := CastOption[int](Some(42))
-	opt2 := CastOption[int](Some("not an int"))
-	opt3 := CastOption[string](Some(42))
-	opt4 := CastOption[int](None[int]())
+	opt1 := Some(42).Cast[int]()
+	opt2 := Some("not an int").Cast[int]()
+	opt3 := Some(42).Cast[string]()
+	opt4 := None[int]().Cast[int]()
 
-	optany := Some(42).ToAny()
+	optany := Some(42).Cast[any]()
 
 	is.Equal(Some(42), opt1)
 	is.Equal(None[int](), opt2)
 	is.Equal(None[string](), opt3)
 	is.Equal(None[int](), opt4)
 	is.Equal(optany, Some[any](42))
-	is.Equal(CastOption[int](optany), Some(42))
+	is.Equal(optany.Cast[int](), Some(42))
 }
 
 func TestOptionTap(t *testing.T) {

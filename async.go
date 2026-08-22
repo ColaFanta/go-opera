@@ -53,42 +53,49 @@ func Await[T any](ctx context.Context, ch <-chan Result[T]) Result[T] {
 // If a channel is nil, the corresponding value will be an empty T.
 // Use AwaitAllSettled to collect all results including errors.
 func AwaitAll[T any](ctx context.Context, chans ...any) Result[[]T] {
-	resultVals := make([]any, len(chans))
-	successCount := 0
-	errch := make(chan error, len(chans))
 	inctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	type outcome struct {
+		index int
+		value any
+		err   error
+	}
+	outcomes := make(chan outcome, len(chans))
 	for i, ch := range chans {
-		go func() {
-			if isChannelNil[Result[T]](ch) {
+		go func(index int, channel any) {
+			var outcome outcome
+			outcome.index = index
+			if isChannelNil[Result[T]](channel) {
 				// do nothing
-			} else if chc, ok := ch.(<-chan Result[T]); ok {
+			} else if chc, ok := channel.(<-chan Result[T]); ok {
 				// for homogeneous channels <-chan Result[T]
 				if res, err := Await(inctx, chc).Get(); err != nil {
-					errch <- err
+					outcome.err = err
 				} else {
-					resultVals[i] = res
+					outcome.value = res
 				}
 				// for heterogeneous channels, T must be any here, so that channels in `chans` may be heterogeneous
-			} else if res, err := awaitAnyReflect(inctx, ch).Get(); err != nil {
-				errch <- err
+			} else if res, err := awaitAnyReflect(inctx, channel).Get(); err != nil {
+				outcome.err = err
 			} else {
-				resultVals[i] = res
+				outcome.value = res
 			}
-			successCount++
-			if successCount == len(chans) {
-				cancel()
-			}
-		}()
+			outcomes <- outcome
+		}(i, ch)
 	}
 
-	select {
-	case err := <-errch:
-		cancel()
-		return Err[[]T](err)
-	case <-ctx.Done():
-		return Err[[]T](fmt.Errorf("%w: Result[%T]", ctx.Err(), Empty[T]()))
-	case <-inctx.Done():
+	resultVals := make([]any, len(chans))
+	for range chans {
+		select {
+		case outcome := <-outcomes:
+			if outcome.err != nil {
+				return Err[[]T](outcome.err)
+			}
+			resultVals[outcome.index] = outcome.value
+		case <-ctx.Done():
+			return Err[[]T](fmt.Errorf("%w: Result[%T]", ctx.Err(), Empty[T]()))
+		}
 	}
 
 	castedVals := make([]T, len(resultVals))
@@ -132,52 +139,62 @@ func AwaitFirst[T any](ctx context.Context, chans ...any) Result[Tuple[T, int]] 
 	inctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	resvalchan := make(chan Tuple[T, int], 1)
-	errs := make([]error, len(chans))
-	errCount := 0
+	type outcome struct {
+		result Tuple[T, int]
+		err    error
+	}
+	outcomes := make(chan outcome, len(chans))
+	activeChannels := 0
+	for _, ch := range chans {
+		if !isChannelNil[Result[T]](ch) {
+			activeChannels++
+		}
+	}
 	for i, ch := range chans {
-		go func() {
-			if isChannelNil[Result[T]](ch) {
-				// do nothing
-			} else if chc, ok := ch.(<-chan Result[T]); ok {
+		go func(index int, channel any) {
+			var outcome outcome
+			if isChannelNil[Result[T]](channel) {
+				return
+			} else if chc, ok := channel.(<-chan Result[T]); ok {
 				// for homogeneous channels
 				if res, err := Await(inctx, chc).Get(); err != nil {
-					errs[i] = err
+					outcome.err = err
 				} else {
-					resvalchan <- Tup(res, i)
+					outcome.result = Tup(res, index)
 				}
-			} else if res, err := awaitAnyReflect(inctx, ch).Get(); err != nil {
+			} else if res, err := awaitAnyReflect(inctx, channel).Get(); err != nil {
 				// for heterogeneous channels, T must be any here, so that channels in `chans` may be heterogeneous
-				errs[i] = err
+				outcome.err = err
 			} else {
 				if res == nil {
-					resvalchan <- Tup(Empty[T](), i)
+					outcome.result = Tup(Empty[T](), index)
 				} else if val, ok := res.(T); ok {
-					resvalchan <- Tup(val, i)
+					outcome.result = Tup(val, index)
 				} else {
-					errs[i] = fmt.Errorf(
+					outcome.err = fmt.Errorf(
 						"%w [%T]: %T, %d",
 						ErrAsyncAwaitedValueCastError,
 						Empty[T](),
 						res,
-						i,
+						index,
 					)
 				}
 			}
-			errCount++
-			if errCount == len(chans) {
-				cancel()
-			}
-		}()
+			outcomes <- outcome
+		}(i, ch)
 	}
 
-	select {
-	case res := <-resvalchan:
-		cancel()
-		return Ok(res)
-	case <-ctx.Done():
-		return Err[Tuple[T, int]](fmt.Errorf("%w: Result[%T]", ctx.Err(), Empty[Tuple[T, int]]()))
-	case <-inctx.Done():
+	errs := make([]error, 0, len(chans))
+	for range activeChannels {
+		select {
+		case outcome := <-outcomes:
+			if outcome.err == nil {
+				return Ok(outcome.result)
+			}
+			errs = append(errs, outcome.err)
+		case <-ctx.Done():
+			return Err[Tuple[T, int]](fmt.Errorf("%w: Result[%T]", ctx.Err(), Empty[Tuple[T, int]]()))
+		}
 	}
 
 	return Err[Tuple[T, int]](errors.Join(ErrAsyncAllOpsFailed, errors.Join(errs...)))

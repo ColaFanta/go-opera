@@ -6,7 +6,8 @@ import (
 )
 
 // Option is a container for an optional value of type T. If value exists, Option is
-// of type Some. If the value is absent, Option is of type None.
+// of type Some. If the value is absent, Option is of type None and stores T's zero
+// value; callers must not treat None as retaining a value.
 type Option[T any] struct {
 	val    T
 	hasVal bool
@@ -22,8 +23,11 @@ func (o Option[T]) IsNone() bool {
 	return !o.hasVal
 }
 
-// Get returns value and presence.
+// Get returns the value and its presence. It returns T's zero value for None.
 func (o Option[T]) Get() (T, bool) {
+	if o.IsNone() {
+		return Empty[T](), false
+	}
 	return o.val, o.hasVal
 }
 
@@ -63,21 +67,21 @@ func (o Option[T]) OrPanic() T {
 }
 
 // Map executes the mapper function if value is present or returns None if absent.
-func (o Option[T]) Map(fn func(value T) T) Option[T] {
-	if o.IsSome() {
-		return Some(fn(o.val))
+func (o Option[T]) Map[M any](fn func(value T) M) Option[M] {
+	val, ok := o.Get()
+	if ok {
+		return Some(fn(val))
 	}
-
-	return o
+	return None[M]()
 }
 
-// Chain executes the mapper function if value is present or returns None if absent.
-func (o Option[T]) Chain(mapper func(value T) Option[T]) Option[T] {
-	if o.IsSome() {
-		return mapper(o.val)
+// FlatMap executes the mapper function if value is present or returns None if absent.
+func (o Option[T]) FlatMap[M any](mapper func(value T) Option[M]) Option[M] {
+	val, ok := o.Get()
+	if ok {
+		return mapper(val)
 	}
-
-	return o
+	return None[M]()
 }
 
 // Tap executes the function if value is present and returns the original Option.
@@ -113,12 +117,19 @@ func (o Option[T]) ToResult() Result[T] {
 		return Ok(o.val)
 	}
 
-	return Try(o.val, fmt.Errorf("%w: %T", ErrNoSuchElement, o.val))
+	return Err[T](fmt.Errorf("%w: %T", ErrNoSuchElement, Empty[T]()))
 }
 
-func (o Option[T]) ToAny() Option[any] {
+func (o Option[T]) Cast[C any]() Option[C] {
 	val, hasVal := o.Get()
-	return Option[any]{val: val, hasVal: hasVal}
+	if !hasVal {
+		return None[C]()
+	}
+	if c, ok := any(val).(C); !ok {
+		return None[C]()
+	} else {
+		return Some(c)
+	}
 }
 
 // ToPointer returns value if present or a nil pointer.

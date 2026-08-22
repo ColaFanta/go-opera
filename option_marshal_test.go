@@ -2,7 +2,7 @@ package opera
 
 import (
 	"database/sql"
-	"encoding/json"
+	json "encoding/json/v2"
 	"fmt"
 	"runtime"
 	"strconv"
@@ -82,6 +82,16 @@ func TestOptionUnmarshalJSON(t *testing.T) {
 
 	err = option2.UnmarshalJSON([]byte(`null`))
 	is.NoError(err)
+	is.Equal(None[string](), option2)
+
+	option2 = Some("stale value")
+	err = option2.UnmarshalJSON([]byte(` null `))
+	is.NoError(err)
+	is.Equal(None[string](), option2)
+
+	option2 = Some("stale value")
+	err = option2.UnmarshalJSON([]byte(`"`))
+	is.Error(err)
 	is.Equal(None[string](), option2)
 
 	type testStruct struct {
@@ -237,6 +247,11 @@ func TestOptionUnmarshalBinary(t *testing.T) {
 	is.Nil(err2)
 	is.Equal(Some("42"), option3)
 	is.Nil(err3)
+
+	option1 = Some(42)
+	err4 := option1.UnmarshalBinary([]byte{2})
+	is.Error(err4)
+	is.Equal(None[int](), option1)
 }
 
 func TestOptionGobEncode(t *testing.T) {
@@ -343,8 +358,8 @@ func TestOptionValueWithPossibleConvert(t *testing.T) {
 }
 
 type SomeScanner struct {
-	Cool bool
-	Some int
+	Cool bool `json:"cool"`
+	Some int  `json:"some"`
 }
 
 func (ss *SomeScanner) Scan(src any) error {

@@ -33,18 +33,18 @@ Semantics:
 
 - `Ok(v)` means success.
 - `Err[T](err)` means failure.
-- `Try(v, err)` adapts ordinary Go `(T, error)` to `Result[T]`.
+- `Try(v, err)` adapts ordinary Go `(T, error)` to `Result[T]` and preserves `v`, including when `err != nil`.
 - `Get()` converts back to `(T, error)`.
 - `Yield()` unwraps success, but on error it panics with an internal wrapper that `Do(...)` knows how to catch.
 
-Important: `Result[T]` may still carry a non-zero value when `err != nil`. Some helpers intentionally preserve the value when remapping errors. Do not assume `err != nil` implies `val` is the zero value.
+Important: `Result[T]` preserves its value when `err != nil`. Some helpers intentionally preserve the value when remapping errors. Do not assume `err != nil` implies `val` is the zero value. Error-path values are partial operation output: use `Get()` to inspect them, not `Yield`, `Or`, `ToOption`, or `ToPointer`.
 
 ### Option[T]
 
 `Option[T]` stores:
 
 - `Some(v)` for presence
-- `None[T]()` for absence
+- `None[T]()` for absence; it is normalized to T's zero value and carries no retained payload
 
 Use it for nullable/optional data, not for real failures. If absence should be promoted to failure, convert using:
 
@@ -237,7 +237,6 @@ Constructors and adapters:
 - `TryLookUp[K comparable, T any](m map[K]T, key K) Result[T]`
 - `TryIf(ok bool) Result[Unit]`
 - `TryCast[T](val any) Result[T]`
-- `CastResult[U, T](res Result[T]) Result[U]`
 
 Bailout helpers:
 
@@ -252,13 +251,13 @@ Methods:
 
 - inspection: `IsOk`, `IsErr`, `Get`, `Err`
 - extraction: `Yield`, `Or`, `OrF`, `OrEmpty`
-- same-type transforms: `Map`, `Chain`
+- transforms: `Map`, `FlatMap`
 - side effects: `Tap`, `TapErr`
 - error remapping: `MapErr`, `MapErrIs`, `MapErrorString`
 - recovery: `Catch`, `CatchIs`, `CatchString`
-- conversion: `ToPointer`, `ToOption`, `ToAny`
+- conversion: `ToPointer`, `ToOption`, `Cast`
 
-Generation rule: do not invent `FlatMap`, `Unwrap`, `UnwrapOr`, `UnwrapOrElse`, `AndThen`, `Expect`, `Recover`, or typed `Map` that changes `T`. They do not exist here.
+Generation rule: do not invent `Unwrap`, `UnwrapOr`, `UnwrapOrElse`, `AndThen`, `Expect`, or `Recover`. They do not exist here.
 
 ## 7. Option API Reference For Generation
 
@@ -270,16 +269,15 @@ Constructors:
 - `MaybeEmpty`
 - `MaybeNilPtr`
 - `MayCast`
-- `CastOption`
 
 Methods:
 
 - inspection: `IsSome`, `IsNone`, `Get`
 - extraction: `Yield`, `Or`, `OrEmpty`
-- same-type transforms: `Map`, `Chain`
+- transforms: `Map`, `FlatMap`
 - side effects: `Tap`, `TapNone`
 - fallback: `OrElse`
-- conversion: `ToResult`, `ToPointer`, `ToAny`
+- conversion: `ToResult`, `ToPointer`, `Cast`
 - utility: `IsZero`, `Equal`
 
 Generation rule: use `Option` for missing data, not operational failures.
@@ -320,18 +318,18 @@ Consequences:
 - `panic("x")` inside `Do` is not converted to `Err`.
 - `panic(err)` inside `Do` is also re-panicked unless it is the internal wrapper.
 
-### Pitfall 2: `Map` and `Chain` are not type-changing
+### Pitfall 2: error payloads do not reliably cross type changes
 
-Actual signatures are same-type only.
+`Map` and `FlatMap` may change the generic type.
 
-- `Result[T].Map(func(T) T)`
-- `Result[T].Chain(func(T) Result[T])`
-- `Option[T].Map(func(T) T)`
-- `Option[T].Chain(func(T) Option[T])`
+- `Result[T].Map(func(T) M)`
+- `Result[T].FlatMap(func(T) Result[M])`
+- `Option[T].Map(func(T) M)`
+- `Option[T].FlatMap(func(T) Option[M])`
 
-Do not generate cross-type transforms with these methods.
+On an `Err`, `Result.Map` and `Result.FlatMap` preserve the payload only when it can be asserted to `M`; otherwise they produce an error result with M's zero value. Use `Get()` before changing types when partial error output must be retained.
 
-If you need a new type, use explicit local variables or convert through normal Go code.
+On a `None`, `Option.Map` and `Option.FlatMap` return a canonical `None[M]()` and never retain a payload.
 
 ### Pitfall 3: `Yield()` outside a managed flow will panic
 
@@ -514,7 +512,7 @@ When generating new code with this package, prefer these stylistic rules.
 Avoid generating code that:
 
 - uses `.Yield()` outside a `Do(...)` block unless deliberate panic semantics are intended
-- assumes `Map` or `Chain` can change type parameters
+- assumes `Map` or `FlatMap` can change type parameters
 - invents non-existent methods from Rust, Scala, samber/mo, or other result libraries
 - treats `Option` as the standard carrier of operational errors
 - assumes nil async channels fail

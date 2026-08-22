@@ -74,17 +74,3 @@ func MayCast[T any](val any) Option[T] {
 
 	return Some(casted)
 }
-
-// CastOption tries to convert Option[T] to Option[U] and returns None if conversion fails.
-func CastOption[U any, T any](opt Option[T]) Option[U] {
-	if opt.IsNone() {
-		return None[U]()
-	}
-
-	converted, ok := any(opt.Yield()).(U)
-	if !ok {
-		return None[U]()
-	}
-
-	return Some(converted)
-}

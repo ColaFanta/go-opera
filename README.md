@@ -1,119 +1,179 @@
 # opera
 
-![Go Version](https://img.shields.io/github/go-mod/go-version/ColaFanta/go-opera)
-![Test Status](https://github.com/ColaFanta/go-opera/actions/workflows/unit-test.yml/badge.svg)
-
+[![Go Version](https://img.shields.io/github/go-mod/go-version/ColaFanta/go-opera)](https://go.dev/doc/devel/release)
+[![Test Status](https://github.com/ColaFanta/go-opera/actions/workflows/unit-test.yml/badge.svg)](https://github.com/ColaFanta/go-opera/actions/workflows/unit-test.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/colafanta/go-opera.svg)](https://pkg.go.dev/github.com/colafanta/go-opera)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENCE)
 
 ![go-opera banner](./.github/assets/repo_banner.png)
 
-`opera` - **Op**tion, **E**rror handling, **R**esult, and **A**sync, a library that brings better error handling and async programming to Golang.
+`opera` brings `Option`, `Result`, fail-fast `Do`, and context-aware async helpers to Go. It is designed for code that needs explicit absence and error handling without repeatedly expanding `(value, error)` checks or coordinating goroutines and result channels by hand.
 
-## Introductions
+## Features
 
-Here are blog posts that explain concepts in detail:
+- **`Option[T]`** represents a value that may be absent, with constructors for maps, slices, pointers, empty values, and casts.
+- **`Result[T]`** represents either a value or an error and provides transformation and recovery helpers.
+- **`Do` notation** enables concise fail-fast code: `Result.Yield()` and `Option.Yield()` return control to `Do` as an error.
+- **`Async` helpers** run context-aware work and await one, all, or the first successful result.
+- **Workflows and resource helpers** support compensating finalizers and scoped resource cleanup.
 
-[Effective error handling in Go with Rust-like Result and "?"](https://dev.to/colafanta/guide-to-go-opera-better-error-handling-in-go-but-less-boilerplate-2hf4)
+## Install
 
-[Why FlatMap Isn’t Ideal for Go Error Handling — A Case for go-opera](https://dev.to/colafanta/go-error-handling-why-flatmap-not-helpful-go-opera-1j25)
-
-[Async/Await-like pattern in Go to make concurrency simple, robust, less boilerplate](https://dev.to/colafanta/asyncawait-like-pattern-in-go-to-make-structured-concurrency-easy-and-with-less-boilerplate-121l)
-
-## Use Case
-### Error Handling with opera
-Checking a username and password often involves nested if statements and explicit error handling, for example:
-
-```go
-func checkLogin(user, password string) (bool, error) {
-     ctx, _ := context.Background()
- 
-    // unpack result in the old way
-    u, err := gorm.G[model.User](db).
-        Where(gen.User.Username.Eq(user)).
-        First(ctx)
-    if err != nil {
-        // return false if user not found
-        if errors.Is(err, gorm.ErrRecordNotFound) {
-            return false, nil
-        }
-        // propagate other errors
-        return false, err
-    }
-
-     if bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password)) != nil {
-        return false, nil
-    }
-
-     return true, nil
-}
+```sh
+go get github.com/colafanta/go-opera
 ```
-With opera `Do` notation, you can safely unwrap the result of a failable function without repeatedly writing `if val, err := fn(); err != nil`. The output of a function can be safely produced with `Result.Yield()`, and fast‑fail is implicitly handled by `Do` notation. No explicit manipulation on `error` is needed in the context of `Do` notation.
-:
 
 ```go
-func(user, password string) (ok bool, err error) {
-    // use `Do` notation
-    return opera.Do(func() bool {
-        ctx, _ := context.Background()
+import opera "github.com/colafanta/go-opera"
+```
 
-        // get user with `Do` notation and `Result` without `if`
-        // fail fast to `Do` when `err` occurs
-        user := opera.Try(gorm.G[model.User](db).
-            Where(gen.User.Username.Eq(user)).
-            First(ctx)).Yield()
+## Quick Start
 
-        // fail fast also applies to `Option` type
-        pwd := opera.MaybeNilPtr(user.Password).Yield()
+Use `Option` for a value that may not exist. `Get` keeps the normal Go `value, ok` shape, while `Or` supplies a fallback.
 
-        // also fail fast if seen `ErrMismatchedHashAndPassword`
-        opera.MustPass(bcrypt.CompareHashAndPassword([]byte(pwd), []byte(password)))
+```go
+config := map[string]int{"port": 8080}
+port := opera.MayLookUp(config, "port").Or(3000)
+// port == 8080
+```
 
-        // login success
-        return true
-    }).
-        // conditionally recover if certain errors are met 
-        CatchIs(gorm.ErrRecordNotFound, false).
-        CatchIs(bcrypt.ErrMismatchedHashAndPassword, false).
-        Get() // unpack to `(T, error)` in the end
+Use `Result` to compose operations that can fail.
+
+```go
+address := opera.Ok(8080).
+	Map(func(port int) string { return fmt.Sprintf("localhost:%d", port) })
+
+value, err := address.Get()
+// value == "localhost:8080", err == nil
+```
+
+## Error Handling With `Do`
+
+`Do` converts a failure yielded from `Result` or `Option` into a `Result`. Inside the callback, use `Yield` to unwrap a successful value. The first yielded error stops the callback and becomes the returned `Result` error.
+
+```go
+func readPort(config map[string]string) (int, error) {
+	return opera.Do(func() int {
+		portText := opera.MustLookUp(config, "port")
+		port, err := strconv.Atoi(portText)
+		return opera.Must(port, err)
+	}).Get()
 }
 ```
 
-#### Performance Caveat
-The design of how this library achieves fail‑fast error handling may introduce little performance overhead. For reference, below is a simple benchmark result of two test cases in the project comparing the same operation with and without `Do`.
-
-```
-cpu: AMD Ryzen 9 8945HS w/ Radeon 780M Graphics
-BenchmarkDoAndGet/ErrFromGet-16              6267090           188.3 ns/op         128 B/op           3 allocs/op
-BenchmarkDoAndGet/ErrFromDo-16               6167328           196.9 ns/op         128 B/op           3 allocs/op
-```
-
-### Concurrency with opera `Async`
-`Async` in opera provides a clean way to organize structured concurrency tasks without manually managing goroutines, channels, or synchronization primitives.
+Errors can be recovered selectively after the `Do` block.
 
 ```go
-func(ctx context.Context, q *gorm.DB, p Params) error {
-    return opera.Do(func () any {
-        // ctx `Done` of parent also cancels tasks fired by opera.Async and unblocks opera.Await
-        countTask := opera.Async(ctx, func(ctx context.Context) opera.Result[int64] {
-            return opera.Try(q.Count(ctx, "*"))
-        })
-        dataTask := opera.Async(ctx, func(ctx context.Context) opera.Result[[]T] {
-            size := p.Size.Or(20)
-            offset := (p.Page.Or(1) - 1) * size
-            q.Offset(offset).Limit(size)
-            return opera.Try(q.Find(ctx))
-        })
-        // Getting results of two async tasks in one line
-        count, data := opera.Await(ctx, countTask).Yield(), opera.Await(ctx, dataTask).Yield()
-        return nil
-    }).Err()
+port := opera.Do(func() int {
+	return opera.MustLookUp(map[string]int{}, "port")
+}).CatchIs(opera.ErrNoSuchElement, 3000).OrEmpty()
+// port == 3000
+```
+
+`Yield` is intended for `Do` notation. For ordinary control flow, prefer `Get`, `Err`, `Or`, or `OrEmpty`; use `OrPanic` only when a panic is deliberately appropriate.
+
+## Structured Concurrency With `Async`
+
+`Async` accepts a `context.Context` and returns a buffered channel of `Result[T]`. Awaiting helpers propagate context cancellation and avoid manual channel plumbing.
+
+```go
+func loadPorts(ctx context.Context) ([]int, error) {
+	primary := opera.Async(ctx, func(context.Context) opera.Result[int] {
+		return opera.Ok(8080)
+	})
+	metrics := opera.Async(ctx, func(context.Context) opera.Result[int] {
+		return opera.Ok(9090)
+	})
+
+	return opera.AwaitAllT(ctx, primary, metrics).Get()
 }
 ```
+
+Use `AwaitAll` for heterogeneous task values, `AwaitAllT` for homogeneous task values, `AwaitFirst` for the first successful result, and `AwaitAllSettled` when every success and failure is needed.
+
+## Documentation And Examples
+
+Each API entry below has a direct link to its reference documentation and, where available, a link to the rendered Go example on `pkg.go.dev`. The examples are executable tests in this repository, so they are checked by `go test` as well as displayed in the package documentation.
+
+### `Option[T]`
+
+An `Option` is either `Some(value)` or `None`. It is useful for optional configuration, map lookups, slice access, nullable pointers, and safe type assertions.
+
+| API | Description | Links |
+| --- | --- | --- |
+| `Some` | Create an option containing a value. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#Some) · [example](https://pkg.go.dev/github.com/colafanta/go-opera#example-Some) |
+| `None` | Create an absent option. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#None) · [example](https://pkg.go.dev/github.com/colafanta/go-opera#example-None) |
+| `MayLookUp` | Turn a map lookup into an option. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#MayLookUp) · [example](https://pkg.go.dev/github.com/colafanta/go-opera#example-MayLookUp) |
+| `MayAt` | Safely access a slice element by index. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#MayAt) · [example](https://pkg.go.dev/github.com/colafanta/go-opera#example-MayAt) |
+| `MaybeNilPtr` | Convert a possibly nil pointer into an option. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#MaybeNilPtr) · [example](https://pkg.go.dev/github.com/colafanta/go-opera#example-MaybeNilPtr) |
+| `Option.Get` | Return the value and its presence flag. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#Option.Get) · [example](https://pkg.go.dev/github.com/colafanta/go-opera#example-Option.Get) |
+| `Option.Map` | Transform a present value. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#Option.Map) · [example](https://pkg.go.dev/github.com/colafanta/go-opera#example-Option.Map) |
+| `Option.FlatMap` | Chain an operation returning another option. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#Option.FlatMap) · [example](https://pkg.go.dev/github.com/colafanta/go-opera#example-Option.FlatMap) |
+| `Option.ToResult` | Convert absence to `ErrNoSuchElement`. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#Option.ToResult) · [example](https://pkg.go.dev/github.com/colafanta/go-opera#example-Option.ToResult) |
+
+### `Result[T]` And `Do`
+
+A `Result` is either `Ok(value)` or `Err(error)`. It retains a partial value passed to `Try` even when an error is present; retrieve that pair with `Get` when it is meaningful to the caller.
+
+| API | Description | Links |
+| --- | --- | --- |
+| `Ok` / `Err` | Create successful or failed results. | [Ok docs](https://pkg.go.dev/github.com/colafanta/go-opera#Ok) · [Ok example](https://pkg.go.dev/github.com/colafanta/go-opera#example-Ok) · [Err docs](https://pkg.go.dev/github.com/colafanta/go-opera#Err) · [Err example](https://pkg.go.dev/github.com/colafanta/go-opera#example-Err) |
+| `Try` | Wrap a standard `(value, error)` result. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#Try) · [example](https://pkg.go.dev/github.com/colafanta/go-opera#example-Try) |
+| `Do` | Capture errors yielded within a callback. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#Do) · [example](https://pkg.go.dev/github.com/colafanta/go-opera#example-Do) |
+| `Must` | Yield a standard `(value, error)` pair inside `Do`. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#Must) · [example](https://pkg.go.dev/github.com/colafanta/go-opera#example-Must) |
+| `Result.Get` | Return the value and error. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#Result.Get) · [example](https://pkg.go.dev/github.com/colafanta/go-opera#example-Result.Get) |
+| `Result.Map` / `FlatMap` | Transform successful values. | [Map docs](https://pkg.go.dev/github.com/colafanta/go-opera#Result.Map) · [Map example](https://pkg.go.dev/github.com/colafanta/go-opera#example-Result.Map) · [FlatMap docs](https://pkg.go.dev/github.com/colafanta/go-opera#Result.FlatMap) · [FlatMap example](https://pkg.go.dev/github.com/colafanta/go-opera#example-Result.FlatMap) |
+| `Result.CatchIs` | Recover from an error matched with `errors.Is`. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#Result.CatchIs) · [example](https://pkg.go.dev/github.com/colafanta/go-opera#example-Result.CatchIs) |
+| `Scoped` | Acquire, use, and release a resource. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#Scoped) · [example](https://pkg.go.dev/github.com/colafanta/go-opera#example-Scoped) |
+
+### Async
+
+| API | Description | Links |
+| --- | --- | --- |
+| `Async` | Run a `Result`-producing task in a goroutine. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#Async) · [example](https://pkg.go.dev/github.com/colafanta/go-opera#example-Async) |
+| `Await` | Wait for one task. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#Await) · [example](https://pkg.go.dev/github.com/colafanta/go-opera#example-Await) |
+| `AwaitAll` | Wait for heterogeneous tasks. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#AwaitAll) · [example](https://pkg.go.dev/github.com/colafanta/go-opera#example-AwaitAll) |
+| `AwaitAllT` | Wait for homogeneous tasks with type safety. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#AwaitAllT) · [example](https://pkg.go.dev/github.com/colafanta/go-opera#example-AwaitAllT) |
+| `AwaitFirst` | Return the first successful task and its index. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#AwaitFirst) · [example](https://pkg.go.dev/github.com/colafanta/go-opera#example-AwaitFirst) |
+| `AwaitAllSettled` | Collect every result, including failures. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#AwaitAllSettled) |
+| `AwaitZip` | Await heterogeneous tasks as a typed tuple. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#AwaitZip) |
+
+### Workflows And Utilities
+
+| API | Description | Links |
+| --- | --- | --- |
+| `Workflow` / `Step` / `Finalize` | Register finalizers and run them in reverse order when a workflow succeeds or fails. | [Workflow docs](https://pkg.go.dev/github.com/colafanta/go-opera#Workflow) · [Step docs](https://pkg.go.dev/github.com/colafanta/go-opera#Step) · [Finalize docs](https://pkg.go.dev/github.com/colafanta/go-opera#Finalize) |
+| `Suspend` | Convert context-aware functions into deferred async thunks. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#Suspend) |
+| `Empty` / `IsEmpty` | Work with the empty value of a type. | [Empty docs](https://pkg.go.dev/github.com/colafanta/go-opera#Empty) · [Empty example](https://pkg.go.dev/github.com/colafanta/go-opera#example-Empty) · [IsEmpty docs](https://pkg.go.dev/github.com/colafanta/go-opera#IsEmpty) · [IsEmpty example](https://pkg.go.dev/github.com/colafanta/go-opera#example-IsEmpty) |
+| `Tup` | Create a typed two-value tuple. | [docs](https://pkg.go.dev/github.com/colafanta/go-opera#Tup) |
+
+For the complete API, including JSON, text, binary, Gob, SQL, tuple, suspend, and async zip helpers, see the [package documentation](https://pkg.go.dev/github.com/colafanta/go-opera).
+
+## Further Reading
+
+- [Effective error handling in Go with Rust-like Result and "?"](https://dev.to/colafanta/guide-to-go-opera-better-error-handling-in-go-but-less-boilerplate-2hf4)
+- [Why FlatMap Isn't Ideal for Go Error Handling - A Case for go-opera](https://dev.to/colafanta/go-error-handling-why-flatmap-not-helpful-go-opera-1j25)
+- [Async/Await-like pattern in Go to make concurrency simple, robust, less boilerplate](https://dev.to/colafanta/asyncawait-like-pattern-in-go-to-make-structured-concurrency-easy-and-with-less-boilerplate-121l)
+
+## Performance
+
+`Do` uses panic and recovery internally to provide fail-fast control flow, which adds a small allocation and latency cost compared with direct error handling. Benchmark the paths that matter to your application before choosing it for a hot loop.
+
+```text
+BenchmarkDoAndGet/ErrFromGet-16    6267090    188.3 ns/op    128 B/op    3 allocs/op
+BenchmarkDoAndGet/ErrFromDo-16     6167328    196.9 ns/op    128 B/op    3 allocs/op
+```
+
+## Development
+
+```sh
+go test ./...
+```
+
+## License
+
+This project is licensed under the [MIT License](LICENCE).
 
 ## Acknowledgments
 
-This library was inspired by two excellent projects:
-
-- [eh](https://github.com/olevski/eh), which introduced the idea of Rust‑like error handling in Go.
-- [mo](https://github.com/samber/mo), from which the `Do` notation and `Option` marshaling into/out of values were adapted.
-
-Many thanks to their authors for the inspiration.
+`opera` is inspired by [eh](https://github.com/olevski/eh), which introduced Rust-like error handling ideas in Go, and [mo](https://github.com/samber/mo), from which the `Do` notation and `Option` marshaling approach were adapted.

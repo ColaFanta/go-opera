@@ -244,13 +244,13 @@ func TestResultMapErr(t *testing.T) {
 	is.Equal(10, opt4.val)
 }
 
-func TestResultChain(t *testing.T) {
+func TestResultFlatMap(t *testing.T) {
 	is := assert.New(t)
 
-	opt1 := Ok(21).Chain(func(i int) Result[int] {
+	opt1 := Ok(21).FlatMap(func(i int) Result[int] {
 		return Ok(42)
 	})
-	opt2 := Err[int](assert.AnError).Chain(func(i int) Result[int] {
+	opt2 := Err[int](assert.AnError).FlatMap(func(i int) Result[int] {
 		is.Fail("should not be called")
 		return Ok(42)
 	})
@@ -334,20 +334,20 @@ func TestResultTypeConvert(t *testing.T) {
 
 	res0 := Ok[any]("hello")
 
-	converted0 := CastResult[string](res0)
+	converted0 := res0.Cast[string]()
 	is.Equal(Ok("hello"), converted0)
 
 	res1 := Ok(42)
 
-	converted1 := CastResult[string](res1)
+	converted1 := res1.Cast[string]()
 	is.Equal(
 		Err[string](fmt.Errorf("%w: expect string, actual int", ErrResultCastFailed)),
 		converted1,
 	)
 
-	res2 := Ok("st").ToAny()
+	res2 := Ok("st").Cast[any]()
 	is.Equal(Ok[any]("st"), res2)
-	converted2 := CastResult[string](res2)
+	converted2 := res2.Cast[string]()
 	is.Equal(Ok("st"), converted2)
 
 }
@@ -420,15 +420,15 @@ func TestResultToAny(t *testing.T) {
 	is := assert.New(t)
 
 	res1 := Ok(42)
-	anyRes1 := res1.ToAny()
+	anyRes1 := res1.Cast[any]()
 	is.Equal(Ok[any](42), anyRes1)
 
 	res2 := Err[int](assert.AnError)
-	anyRes2 := res2.ToAny()
+	anyRes2 := res2.Cast[any]()
 	is.Equal(Try[any](0, assert.AnError), anyRes2)
 
 	res3 := Try("hello", assert.AnError)
-	anyRes3 := res3.ToAny()
+	anyRes3 := res3.Cast[any]()
 	is.Equal(Try[any]("hello", assert.AnError), anyRes3)
 }
 

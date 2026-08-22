@@ -9,7 +9,8 @@ var ErrPredicateFalse = errors.New("predicate returns false")
 var ErrInputCastFailed = errors.New("cast input failed")
 var ErrResultCastFailed = errors.New("inner value type cast failed")
 
-// Try constructs a Result from a value and an error.
+// Try constructs a Result from a value and an error, preserving the value even
+// when err is non-nil so callers can inspect partial operation output with Get.
 func Try[T any](val T, err error) Result[T] {
 	return Result[T]{val: val, err: err}
 }
@@ -123,25 +124,4 @@ func Scoped[T, R any](
 	}
 
 	return use(acquiredRes)
-}
-
-// CastResult attempts to convert the value inside a Result[T] to type U.
-func CastResult[U, T any](res Result[T]) Result[U] {
-	{
-		if res.IsErr() {
-			return Err[U](res.Err())
-		}
-		converted, ok := any(res.Yield()).(U)
-		if !ok {
-			return Err[U](
-				fmt.Errorf(
-					"%w: expect %T, actual %T",
-					ErrResultCastFailed,
-					converted,
-					res.Yield(),
-				),
-			)
-		}
-		return Ok(converted)
-	}
 }

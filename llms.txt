@@ -8,8 +8,8 @@ Primary themes: Result, Option, Do/Try/Yield fail-fast flow, async task orchestr
 
 ## Core Mental Model
 
-- `Result[T]` is the primary error carrier. It stores either `(value, nil)` or `(zero-or-partial-value, err)`.
-- `Option[T]` represents presence/absence without an error.
+- `Result[T]` is the primary error carrier. It preserves `(value, err)`, including partial values when `err != nil`; only `Get()` exposes those error-path values.
+- `Option[T]` represents presence/absence without an error. `None` has no value and is normalized to `T`'s zero value.
 - `Do(func() T)` creates a fail-fast block. Inside it, calling `.Yield()` on `Result[T]` or `Option[T]` aborts the block and turns control back into a `Result[T]`.
 - `Try(...)`, `Must(...)`, `TryPass(...)`, `MustPass(...)`, `TryIf(...)`, `MustTrue(...)`, `TryHave(...)`, and `MustHave(...)` are adapters from ordinary Go return patterns into opera's fail-fast flow.
 - `Get()` converts a `Result[T]` back to classic Go `(T, error)` at the boundary.
@@ -48,14 +48,14 @@ func LoadThing(id string) (Thing, error) {
 
 Result:
 
-- Constructors: `Ok`, `Err`, `Try`, `TryPass`, `TryHave`, `TryLookUp`, `TryIf`, `TryCast`, `CastResult`
+- Constructors: `Ok`, `Err`, `Try`, `TryPass`, `TryHave`, `TryLookUp`, `TryIf`, `TryCast`
 - Bailout helpers: `Must`, `MustPass`, `MustHave`, `MustLookUp`, `MustTrue`, `MustCast`
-- Methods: `IsOk`, `IsErr`, `Get`, `Err`, `Yield`, `Or`, `OrF`, `OrEmpty`, `Map`, `Chain`, `Tap`, `TapErr`, `MapErr`, `MapErrIs`, `MapErrorString`, `Catch`, `CatchIs`, `CatchString`, `ToPointer`, `ToOption`, `ToAny`
+- Methods: `IsOk`, `IsErr`, `Get`, `Err`, `Yield`, `Or`, `OrF`, `OrEmpty`, `Map`, `FlatMap`, `Tap`, `TapErr`, `MapErr`, `MapErrIs`, `MapErrorString`, `Catch`, `CatchIs`, `CatchString`, `ToPointer`, `ToOption`, `Cast`
 
 Option:
 
-- Constructors: `Some`, `None`, `MayHave`, `MayLookUp`, `MaybeEmpty`, `MaybeNilPtr`, `MayCast`, `CastOption`
-- Methods: `IsSome`, `IsNone`, `Get`, `Yield`, `Or`, `OrEmpty`, `Map`, `Chain`, `Tap`, `TapNone`, `OrElse`, `ToResult`, `ToPointer`, `ToAny`, `IsZero`, `Equal`
+- Constructors: `Some`, `None`, `MayHave`, `MayLookUp`, `MaybeEmpty`, `MaybeNilPtr`, `MayCast`
+- Methods: `IsSome`, `IsNone`, `Get`, `Yield`, `Or`, `OrEmpty`, `Map`, `FlatMap`, `Tap`, `TapNone`, `OrElse`, `ToResult`, `ToPointer`, `Cast`, `IsZero`, `Equal`
 - Integrations: JSON/text/binary/gob marshal/unmarshal, SQL `Scan`, driver `Value`
 
 Async:
@@ -74,9 +74,8 @@ Workflow / utility:
 
 ## Constraints LLMs Must Respect When Generating Code
 
-- `Result.Map` is same-type only: `func(T) T`. It does not change the generic type.
-- `Result.Chain` is same-type only: `func(T) Result[T]`.
-- `Option.Map` and `Option.Chain` are also same-type only.
+- `Result.Map` and `Result.FlatMap` may change the generic type. When called on an `Err`, they retain its value only if it can be asserted to the destination type; do not rely on them to preserve an error payload across a type change.
+- `Option.Map` and `Option.FlatMap` may change the generic type and always return a canonical `None` when called on a `None`.
 - `Do` only converts panics produced by opera's internal `Yield` wrapper. Ordinary panics are re-panicked.
 - `Option.Yield()` on `None` becomes `ErrNoSuchElement` only when executed inside `Do` or another caller that intentionally catches the wrapper panic.
 - `AwaitAll` / `AwaitFirst` can accept heterogeneous channels only when called with `T=any` or with zip helpers.

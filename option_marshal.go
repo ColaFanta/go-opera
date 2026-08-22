@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"encoding/gob"
-	"encoding/json"
+	json "encoding/json/v2"
 	"errors"
 	"fmt"
 	"reflect"
@@ -25,17 +25,12 @@ func (o Option[T]) MarshalJSON() ([]byte, error) {
 	return json.Marshal(nil)
 }
 
-// UnmarshalJSON decodes Option from json.
+// UnmarshalJSON decodes Option from json. A JSON null decodes to a canonical None.
 func (o *Option[T]) UnmarshalJSON(b []byte) error {
-	o.val = Empty[T]() // reset the value if not set later.
+	o.val = Empty[T]()
+	o.hasVal = false
 
-	// If user manually set the field to be `null`, then it either means the option is absent or present with a zero value.
-	if bytes.Equal([]byte("null"), bytes.ToLower(b)) {
-		// // If the type is a pointer, then it means the option is present with a zero value.
-		// o.isPresent = reflect.TypeOf(o.value).Kind() == reflect.Ptr
-		// return nil
-
-		o.hasVal = false
+	if bytes.Equal([]byte("null"), bytes.ToLower(bytes.TrimSpace(b))) {
 		return nil
 	}
 
@@ -76,14 +71,18 @@ func (o Option[T]) MarshalBinary() ([]byte, error) {
 
 // UnmarshalBinary is the interface implemented by an object that can unmarshal a binary representation of itself.
 func (o *Option[T]) UnmarshalBinary(data []byte) error {
+	o.val = Empty[T]()
+	o.hasVal = false
+
 	if len(data) == 0 {
 		return errors.New("Option[T].UnmarshalBinary: no data")
 	}
 
 	if data[0] == 0 {
-		o.hasVal = false
-		o.val = Empty[T]()
 		return nil
+	}
+	if data[0] != 1 {
+		return fmt.Errorf("Option[T].UnmarshalBinary: invalid presence marker %d", data[0])
 	}
 
 	buf := bytes.NewBuffer(data[1:])
@@ -109,9 +108,10 @@ func (o *Option[T]) GobDecode(data []byte) error {
 
 // Scan implements the SQL sql.Scanner interface.
 func (o *Option[T]) Scan(src any) error {
+	o.val = Empty[T]()
+	o.hasVal = false
+
 	if src == nil {
-		o.hasVal = false
-		o.val = Empty[T]()
 		return nil
 	}
 

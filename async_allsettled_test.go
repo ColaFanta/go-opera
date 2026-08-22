@@ -51,13 +51,13 @@ func TestAwaitAllSettledHetero(t *testing.T) {
 	is.Equal(3, len(result))
 
 	is.True(result[0].IsOk())
-	is.Equal(42, CastResult[int](result[0]).Yield())
+	is.Equal(42, result[0].Cast[int]().Yield())
 
 	is.True(result[1].IsErr())
 	is.EqualError(result[1].Err(), "Test Error")
 
 	is.True(result[2].IsOk())
-	is.Equal(3.14, CastResult[float64](result[2]).Yield())
+	is.Equal(3.14, result[2].Cast[float64]().Yield())
 }
 
 func TestAwaitAllSettledHomo(t *testing.T) {

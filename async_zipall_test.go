@@ -3,6 +3,7 @@ package opera
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -249,4 +250,26 @@ func TestAsyncAwaitTError(t *testing.T) {
 
 	is.True(result.IsErr())
 	is.EqualError(result.Err(), "Test Error")
+}
+
+func TestAwaitAllConcurrentOutcomes(t *testing.T) {
+	is := assert.New(t)
+	ctx := t.Context()
+	start := make(chan struct{})
+	var workers sync.WaitGroup
+	workers.Add(3)
+
+	chans := make([]<-chan Result[int], 3)
+	for index := range chans {
+		chans[index] = Async[int](ctx, func(context.Context) Result[int] {
+			defer workers.Done()
+			<-start
+			return Ok(42)
+		})
+	}
+
+	close(start)
+	result := AwaitAllT(ctx, chans...)
+	workers.Wait()
+	is.Equal(Ok([]int{42, 42, 42}), result)
 }
