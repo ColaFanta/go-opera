@@ -17,6 +17,14 @@
 - **`Async` helpers** run context-aware work and await one, all, or the first successful result.
 - **Workflows and resource helpers** support compensating finalizers and scoped resource cleanup.
 
+## Agent Skills
+
+See the [categorized skills](./skills/index.md) for package usage and safe legacy
+Go migrations: Result flow, optional values, async coordination, and resource
+workflows. Each category has a `SKILL.md` entry point and focused references with
+replacement patterns, equivalence conditions, and cases to leave unchanged.
+The index also explains how to enable skill discovery in a consuming project.
+
 ## Install
 
 ```sh
