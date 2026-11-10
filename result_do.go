@@ -30,3 +30,5 @@ type errYieldErrorWrapper struct {
 func (e errYieldErrorWrapper) Error() string {
 	return fmt.Sprintf("yielded error: %s", e.err.Error())
 }
+
+var _ error = *new(errYieldErrorWrapper)

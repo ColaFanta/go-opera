@@ -251,6 +251,29 @@ func ExampleOption_ToResult_error() {
 	// Output: isMissing: true
 }
 
+func ExampleOption_ToResult_customError() {
+	missingName := errors.New("name is required")
+	result := opera.None[string]().ToResult(missingName)
+	fmt.Println("isMissingName:", errors.Is(result.Err(), missingName))
+	fmt.Println("error:", result.Err())
+	// Output:
+	// isMissingName: true
+	// error: name is required: string
+}
+
+func ExampleOption_ToResult_joinedErrors() {
+	missingName := errors.New("name is required")
+	invalidRequest := errors.New("invalid request")
+	result := opera.None[string]().ToResult(nil, missingName, invalidRequest)
+	fmt.Println("isMissingName:", errors.Is(result.Err(), missingName))
+	fmt.Println("isInvalidRequest:", errors.Is(result.Err(), invalidRequest))
+	fmt.Println("defaultError:", errors.Is(opera.None[string]().ToResult(nil, nil).Err(), opera.ErrNoSuchElement))
+	// Output:
+	// isMissingName: true
+	// isInvalidRequest: true
+	// defaultError: true
+}
+
 func ExampleOption_MarshalJSON() {
 	statusOption := opera.Some("ready")
 	encodedStatus, marshalErr := statusOption.MarshalJSON()
