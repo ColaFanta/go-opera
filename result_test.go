@@ -3,6 +3,7 @@ package opera
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
 	"testing"
 
@@ -242,6 +243,104 @@ func TestResultMapErr(t *testing.T) {
 	is.Equal(Err[int](err2), opt2)
 	is.Equal(Ok(10), opt3)
 	is.Equal(10, opt4.val)
+}
+
+func TestResultMapErrorAs(t *testing.T) {
+	typedErr := &fs.PathError{Op: "open", Path: "config.json", Err: fs.ErrNotExist}
+	otherErr := errors.New("unrelated failure")
+	mappedErr := errors.New("configuration unavailable")
+	tests := []struct {
+		name  string
+		input Result[int]
+		match bool
+	}{
+		{"success", Ok(42), false},
+		{"unmatched", Try(42, otherErr), false},
+		{"direct", Try(42, typedErr), true},
+		{"wrapped", Try(42, fmt.Errorf("load: %w", typedErr)), true},
+		{"joined", Try(42, errors.Join(otherErr, typedErr)), true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			is := assert.New(t)
+			calls := 0
+			result := test.input.MapErrorAs(func(err *fs.PathError) error {
+				calls++
+				is.Same(typedErr, err)
+				return mappedErr
+			})
+			if test.match {
+				is.Equal(1, calls)
+				is.Equal(Try(42, mappedErr), result)
+			} else {
+				is.Zero(calls)
+				is.Equal(test.input, result)
+			}
+		})
+	}
+
+	t.Run("nil mapping recovers partial value", func(t *testing.T) {
+		result := Try(42, typedErr).MapErrorAs(func(*fs.PathError) error {
+			return nil
+		})
+		assert.Equal(t, Ok(42), result)
+	})
+}
+
+func TestResultCatchAs(t *testing.T) {
+	typedErr := &fs.PathError{Op: "open", Path: "config.json", Err: fs.ErrNotExist}
+	otherErr := errors.New("unrelated failure")
+	tests := []struct {
+		name  string
+		input Result[int]
+		match bool
+	}{
+		{"success", Ok(42), false},
+		{"unmatched", Try(42, otherErr), false},
+		{"direct", Try(42, typedErr), true},
+		{"wrapped", Try(42, fmt.Errorf("load: %w", typedErr)), true},
+		{"joined", Try(42, errors.Join(otherErr, typedErr)), true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			is := assert.New(t)
+			calls := 0
+			result := test.input.CatchAs(func(err *fs.PathError) Result[int] {
+				calls++
+				is.Same(typedErr, err)
+				return Ok(80)
+			})
+			if test.match {
+				is.Equal(1, calls)
+				is.Equal(Ok(80), result)
+			} else {
+				is.Zero(calls)
+				is.Equal(test.input, result)
+			}
+		})
+	}
+	t.Run("zero fallback", func(t *testing.T) {
+		result := Try(42, typedErr).CatchAs(func(*fs.PathError) Result[int] {
+			return Ok(0)
+		})
+		assert.Equal(t, Ok(0), result)
+	})
+	t.Run("failed recovery preserves original partial value", func(t *testing.T) {
+		result := Try(42, fmt.Errorf("load: %w", typedErr)).CatchAs(func(*fs.PathError) Result[int] {
+			return Try(99, otherErr)
+		})
+		assert.Equal(t, Try(42, otherErr), result)
+	})
+	t.Run("interface match", func(t *testing.T) {
+		result := Try(42, typedErr).CatchAs(func(err interface {
+			error
+			Timeout() bool
+		}) Result[int] {
+			assert.Same(t, typedErr, err)
+			return Ok(80)
+		})
+		assert.Equal(t, Ok(80), result)
+	})
 }
 
 func TestResultFlatMap(t *testing.T) {
