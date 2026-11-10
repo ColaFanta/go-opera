@@ -64,7 +64,7 @@ func ExampleTryHave() {
 	// Output: valOfOpera: ready
 }
 
-func ExampleTryLookUp() {
+func ExampleMayLookUp_withDefault() {
 	config := map[string]int{"port": 8080}
 
 	valOfPlainWay, ok := config["port"]
@@ -73,12 +73,7 @@ func ExampleTryLookUp() {
 		return
 	}
 
-	result := opera.TryLookUp(config, "port")
-	valOfOpera, operaErr := result.Get()
-	if operaErr != nil {
-		fmt.Println("opera error:", operaErr)
-		return
-	}
+	valOfOpera := opera.MayLookUp(config, "port").Or(0)
 
 	fmt.Println("valOfPlainWay:", valOfPlainWay)
 	fmt.Println("valOfOpera:", valOfOpera)
@@ -87,19 +82,11 @@ func ExampleTryLookUp() {
 	// valOfOpera: 8080
 }
 
-func ExampleTryAt() {
+func ExampleMayAt_withDefault() {
 	stages := []string{"validate", "persist"}
-	result := opera.TryAt(stages, 1)
-	valOfOpera := result.OrEmpty()
+	valOfOpera := opera.MayAt(stages, 1).OrEmpty()
 	fmt.Println("valOfOpera:", valOfOpera)
 	// Output: valOfOpera: persist
-}
-
-func ExampleTryIf() {
-	isAuthorized := true
-	result := opera.TryIf(isAuthorized)
-	fmt.Println("isAuthorized:", result.IsOk())
-	// Output: isAuthorized: true
 }
 
 func ExampleTryCast() {
@@ -110,76 +97,34 @@ func ExampleTryCast() {
 	// Output: valOfOpera: ready
 }
 
-func ExampleMustCast() {
-	input := any("ready")
-	result := opera.Do(func() string {
-		castedStatus := opera.MustCast[string](input)
-		return castedStatus
-	})
-	valOfOpera := result.OrEmpty()
-	fmt.Println("valOfOpera:", valOfOpera)
-	// Output: valOfOpera: ready
-}
-
-func ExampleMust() {
+func ExampleTryYield() {
 	readPort := func() (int, error) { return 8080, nil }
 	result := opera.Do(func() int {
-		port := opera.Must(readPort())
-		return port
+		return opera.TryYield(readPort())
 	})
-	valOfOpera := result.OrEmpty()
-	fmt.Println("valOfOpera:", valOfOpera)
-	// Output: valOfOpera: 8080
+	fmt.Println("port:", result.OrEmpty())
+	// Output: port: 8080
 }
 
-func ExampleMustPass() {
+func ExampleTryYieldUnit() {
+	shutdown := func() error { return nil }
 	result := opera.Do(func() opera.Unit {
-		opera.MustPass(nil)
-		return opera.U
+		return opera.TryYieldUnit(shutdown())
 	})
 	fmt.Println("completed:", result.IsOk())
 	// Output: completed: true
 }
 
-func ExampleMustHave() {
-	result := opera.Do(func() string {
-		status := opera.MustHave("ready", true)
-		return status
-	})
-	valOfOpera := result.OrEmpty()
-	fmt.Println("valOfOpera:", valOfOpera)
-	// Output: valOfOpera: ready
-}
-
-func ExampleMustLookUp() {
-	config := map[string]int{"port": 8080}
+func ExampleYieldErr() {
+	knownErr := errors.New("shutdown failed")
 	result := opera.Do(func() int {
-		port := opera.MustLookUp(config, "port")
-		return port
+		if knownErr != nil {
+			return opera.YieldErr[int](knownErr)
+		}
+		return 0
 	})
-	valOfOpera := result.OrEmpty()
-	fmt.Println("valOfOpera:", valOfOpera)
-	// Output: valOfOpera: 8080
-}
-
-func ExampleMustAt() {
-	stages := []string{"validate", "persist"}
-	result := opera.Do(func() string {
-		stage := opera.MustAt(stages, 0)
-		return stage
-	})
-	valOfOpera := result.OrEmpty()
-	fmt.Println("valOfOpera:", valOfOpera)
-	// Output: valOfOpera: validate
-}
-
-func ExampleMustTrue() {
-	result := opera.Do(func() opera.Unit {
-		opera.MustTrue(true)
-		return opera.U
-	})
-	fmt.Println("completed:", result.IsOk())
-	// Output: completed: true
+	fmt.Println("error:", result.Err())
+	// Output: error: shutdown failed
 }
 
 func ExampleScoped() {

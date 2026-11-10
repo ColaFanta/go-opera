@@ -1,11 +1,46 @@
 package opera
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestOptionToResultErrors(t *testing.T) {
+	missing := errors.New("missing configuration")
+	invalid := errors.New("invalid configuration")
+	tests := []struct {
+		name string
+		errs []error
+		want []error
+	}{
+		{"no errors", nil, []error{ErrNoSuchElement}},
+		{"nil error", []error{nil}, []error{ErrNoSuchElement}},
+		{"all nil", []error{nil, nil}, []error{ErrNoSuchElement}},
+		{"custom error", []error{missing}, []error{missing}},
+		{"leading nil", []error{nil, missing}, []error{missing}},
+		{"trailing nil", []error{missing, nil}, []error{missing}},
+		{"joined errors", []error{missing, nil, invalid}, []error{missing, invalid}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			is := assert.New(t)
+			value, err := None[int]().ToResult(test.errs...).Get()
+			is.Zero(value)
+			for _, target := range test.want {
+				is.ErrorIs(err, target)
+			}
+			if len(test.errs) > 0 && errors.Join(test.errs...) != nil {
+				is.NotErrorIs(err, ErrNoSuchElement)
+			}
+			is.Contains(err.Error(), ": int")
+			is.Equal(Ok(42), Some(42).ToResult(test.errs...))
+			is.Equal(Ok(0), Some(0).ToResult(test.errs...))
+		})
+	}
+}
 
 func TestOptionSome(t *testing.T) {
 	is := assert.New(t)

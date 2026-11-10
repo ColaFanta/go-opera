@@ -127,8 +127,8 @@ func (r Result[T]) MapErrIs(pred error, other error) Result[T] {
 	return r
 }
 
-// MapErrorString tests if the error message contains a substring, and if it does, replaces it with another error.
-func (r Result[T]) MapErrorString(contains string, other error) Result[T] {
+// MapErrString tests if the error message contains a substring, and if it does, replaces it with another error.
+func (r Result[T]) MapErrString(contains string, other error) Result[T] {
 	if r.IsErr() && strings.Contains(r.err.Error(), contains) {
 		return Try(r.val, other)
 	}
@@ -147,6 +147,16 @@ func (r Result[T]) MapErr(fn func(error) error) Result[T] {
 	return Try(r.val, err) // This ensures in some case `val` somehow holds non-zero value
 }
 
+// MapErrAs tests if the error can be cast to a specific type, and if it can, applies a function to transform it.
+func (r Result[T]) MapErrAs[E error](fn func(E) error) Result[T] {
+	return r.MapErr(func(err error) error {
+		if target, ok := errors.AsType[E](r.err); ok {
+			return fn(target)
+		}
+		return err
+	})
+}
+
 // Catch applies a function that returns a Result to the error if the Result is Err, otherwise returns the Ok unchanged.
 func (r Result[T]) Catch(fn func(error) Result[T]) Result[T] {
 	if r.IsOk() {
@@ -157,6 +167,18 @@ func (r Result[T]) Catch(fn func(error) Result[T]) Result[T] {
 		return nr
 	}
 	return Try(r.val, nr.err) // This ensures in some case `val` somehow holds non-zero value
+}
+
+// CatchAs applies fn to the first error matching E in the error tree.
+// Successes and unmatched errors are unchanged. If fn returns a failure, the
+// original value is preserved with the handler's error, as with Catch.
+func (r Result[T]) CatchAs[E error](fn func(E) Result[T]) Result[T] {
+	return r.Catch(func(err error) Result[T] {
+		if target, ok := errors.AsType[E](err); ok {
+			return fn(target)
+		}
+		return r
+	})
 }
 
 // CatchIs tests the error using errors.Is, and if it matches, recovers by applying a handler function to produce a value.
