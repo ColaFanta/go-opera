@@ -147,6 +147,16 @@ func (r Result[T]) MapErr(fn func(error) error) Result[T] {
 	return Try(r.val, err) // This ensures in some case `val` somehow holds non-zero value
 }
 
+// MapErrorAs tests if the error can be cast to a specific type, and if it can, applies a function to transform it.
+func (r Result[T]) MapErrorAs[E error](fn func(E) error) Result[T] {
+	return r.MapErr(func(err error) error {
+		if target, ok := errors.AsType[E](r.err); ok {
+			return fn(target)
+		}
+		return err
+	})
+}
+
 // Catch applies a function that returns a Result to the error if the Result is Err, otherwise returns the Ok unchanged.
 func (r Result[T]) Catch(fn func(error) Result[T]) Result[T] {
 	if r.IsOk() {
@@ -171,6 +181,17 @@ func (r Result[T]) CatchIs(pred error, fallback T) Result[T] {
 // CatchString tests if the error message contains a substring, and if it does, recovers by providing a fallback value.
 func (r Result[T]) CatchString(contains string, fallback T) Result[T] {
 	if r.IsErr() && strings.Contains(r.err.Error(), contains) {
+		return Ok(fallback)
+	}
+	return r
+}
+
+// CatchAs tests if the error can be cast to a specific type, and if it can, recovers by providing a fallback value.
+func (r Result[T]) CatchAs[E error](fallback T) Result[T] {
+	if r.IsOk() {
+		return r
+	}
+	if _, ok := errors.AsType[E](r.err); ok {
 		return Ok(fallback)
 	}
 	return r

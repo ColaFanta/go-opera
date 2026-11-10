@@ -1,6 +1,7 @@
 package opera
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 )
@@ -112,14 +113,21 @@ func (o Option[T]) OrElse(fn func() Option[T]) Option[T] {
 }
 
 // ToResult converts Option to Result, returning Err if value is absent.
-func (o Option[T]) ToResult() Result[T] {
+// If the provided error is nil, ErrNoSuchElement will be used.
+func (o Option[T]) ToResult(errs ...error) Result[T] {
 	if o.IsSome() {
 		return Ok(o.val)
 	}
 
-	return Err[T](fmt.Errorf("%w: %T", ErrNoSuchElement, Empty[T]()))
+	err := errors.Join(errs...)
+	if err == nil {
+		err = ErrNoSuchElement
+	}
+
+	return Err[T](fmt.Errorf("%w: %T", err, Empty[T]()))
 }
 
+// Cast attempts to cast the Option's value to a different type, returning None if the cast fails or the value is absent.
 func (o Option[T]) Cast[C any]() Option[C] {
 	val, hasVal := o.Get()
 	if !hasVal {

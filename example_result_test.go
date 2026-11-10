@@ -3,6 +3,7 @@ package opera_test
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 
 	"github.com/colafanta/go-opera"
 )
@@ -142,6 +143,33 @@ func ExampleResult_MapErr() {
 	})
 	fmt.Println("mappedError:", result.Err())
 	// Output: mappedError: request: invalid request
+}
+
+func ExampleResult_MapErrorAs() {
+	readErr := &fs.PathError{Op: "open", Path: "config.json", Err: fs.ErrNotExist}
+	partialConfig := opera.Try("partial", fmt.Errorf("load: %w", readErr))
+	result := partialConfig.MapErrorAs(func(err *fs.PathError) error {
+		return fmt.Errorf("configuration %s: %w", err.Path, err.Err)
+	})
+	value, err := result.Get()
+	fmt.Println("partialValue:", value)
+	fmt.Println("mappedError:", err)
+	fmt.Println("isNotExist:", errors.Is(err, fs.ErrNotExist))
+	// Output:
+	// partialValue: partial
+	// mappedError: configuration config.json: file does not exist
+	// isNotExist: true
+}
+
+func ExampleResult_CatchAs() {
+	readErr := &fs.PathError{Op: "open", Path: "config.json", Err: fs.ErrNotExist}
+	failedConfig := opera.Err[string](fmt.Errorf("load: %w", readErr))
+	value, err := failedConfig.CatchAs[*fs.PathError]("default configuration").Get()
+	fmt.Println("value:", value)
+	fmt.Println("error:", err)
+	// Output:
+	// value: default configuration
+	// error: <nil>
 }
 
 func ExampleResult_Catch() {
